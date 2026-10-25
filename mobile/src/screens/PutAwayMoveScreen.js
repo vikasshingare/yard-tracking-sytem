@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View, StyleSheet } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '../components/FormControls';
 import BarcodeScanner from '../components/BarcodeScanner';
 import useLocationCapture from '../components/LocationCapture';
 import api, { errorMessage } from '../api';
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   tabText: { color: 'white', fontWeight: '900', fontSize: 16 },
   step: { fontSize: 18, fontWeight: '700', color: '#283640' },
   value: { padding: 12, fontSize: 16, backgroundColor: 'white', borderRadius: 10 },
-  picker: { backgroundColor: 'white', borderRadius: 12, overflow: 'hidden' },
+  picker: { backgroundColor: 'white', borderWidth: 1.25, borderColor: '#111111', borderRadius: 14, overflow: 'hidden' },
   gps: { fontSize: 15, color: '#53616b' },
   action: { minHeight: 68, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   green: { backgroundColor: '#16834a' }, blue: { backgroundColor: '#1672b8' },

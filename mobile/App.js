@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, Image, Pressable, Text, View, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as Network from 'expo-network';
@@ -25,7 +25,7 @@ const ROLE_LABELS = { yard_operator: 'Yard operator', gate_operator: 'Gate opera
 function YardDrawerContent({ user, onLogout, ...props }) {
   return <View style={styles.drawer}>
     <DrawerContentScrollView {...props} contentContainerStyle={{ flexGrow: 1 }}>
-      <View style={styles.brand}><View style={styles.brandIcon}><Text style={styles.brandEmoji}>🚚</Text></View><Text style={styles.brandTitle}>YARD TRACKER</Text><Text style={styles.brandSub}>OPERATIONS MENU</Text></View>
+      <View style={styles.brand}><Image source={require('./assets/stw-launch-logo.jpg')} style={styles.brandLogo} resizeMode="contain" accessibilityLabel="STW Logistics logo"/><Text style={styles.brandTitle}>YARD TRACKER</Text><Text style={styles.brandSub}>OPERATIONS MENU</Text></View>
       <View style={styles.userCard}><Text style={styles.userName}>{user.displayName || user.name}</Text><Text style={styles.userRole}>{ROLE_LABELS[user.role] || user.role}</Text></View>
       <Text style={styles.menuLabel}>YARD</Text>
       <DrawerItemList {...props}/>
@@ -68,4 +68,4 @@ export default function App() {
   </NavigationContainer></SafeAreaProvider></GestureHandlerRootView>;
 }
 
-const styles=StyleSheet.create({loading:{flex:1,justifyContent:'center',alignItems:'center'},drawer:{flex:1},brand:{padding:20,paddingTop:22,backgroundColor:'#16232d',marginBottom:14},brandIcon:{width:45,height:45,borderRadius:14,backgroundColor:'#ffffff20',alignItems:'center',justifyContent:'center'},brandEmoji:{fontSize:23},brandTitle:{fontSize:18,fontWeight:'900',color:'white',marginTop:12},brandSub:{fontSize:10,letterSpacing:1.4,fontWeight:'800',color:'#a8b7bf',marginTop:3},userCard:{marginHorizontal:15,marginBottom:13,padding:13,borderRadius:12,backgroundColor:'#f2f6f4'},userName:{fontSize:14,fontWeight:'900',color:'#20313a'},userRole:{fontSize:11,color:'#6a7b81',marginTop:3},menuLabel:{fontSize:10,fontWeight:'900',letterSpacing:1.2,color:'#8b989d',marginHorizontal:24,marginBottom:5},logout:{height:58,borderTopWidth:1,borderColor:'#e6ebed',justifyContent:'center',paddingHorizontal:24},logoutText:{fontSize:14,fontWeight:'900',color:'#b43b37'}});
+const styles=StyleSheet.create({loading:{flex:1,justifyContent:'center',alignItems:'center'},drawer:{flex:1},brand:{padding:18,paddingTop:22,backgroundColor:'#ffffff',marginBottom:14,borderBottomWidth:1,borderColor:'#e5eaee'},brandLogo:{width:'100%',height:102,alignSelf:'center'},brandTitle:{fontSize:18,fontWeight:'900',color:'#16232d',marginTop:8},brandSub:{fontSize:10,letterSpacing:1.4,fontWeight:'800',color:'#687985',marginTop:3},userCard:{marginHorizontal:15,marginBottom:13,padding:13,borderRadius:12,backgroundColor:'#f2f6f4'},userName:{fontSize:14,fontWeight:'900',color:'#20313a'},userRole:{fontSize:11,color:'#6a7b81',marginTop:3},menuLabel:{fontSize:10,fontWeight:'900',letterSpacing:1.2,color:'#8b989d',marginHorizontal:24,marginBottom:5},logout:{height:58,borderTopWidth:1,borderColor:'#e6ebed',justifyContent:'center',paddingHorizontal:24},logoutText:{fontSize:14,fontWeight:'900',color:'#b43b37'}});

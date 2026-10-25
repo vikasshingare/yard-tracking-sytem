@@ -1,5 +1,6 @@
 import React,{useState} from 'react';
-import {Alert,FlatList,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
+import {Alert,FlatList,Pressable,StyleSheet,Text,View} from 'react-native';
+import { TextInput } from '../components/FormControls';
 import {Container,Search} from 'lucide-react-native';
 import BarcodeScanner from '../components/BarcodeScanner';
 import api,{errorMessage} from '../api';

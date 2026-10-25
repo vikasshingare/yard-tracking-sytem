@@ -2,11 +2,34 @@
   "expo": {
     "name": "Yard Tracker",
     "slug": "yard-tracker",
-    "version": "1.0.0",
+    "version": "1.2.0",
+    "icon": "./assets/stw-app-icon.png",
+    "android": {
+      "package": "com.yardtracker.mobile",
+      "versionCode": 4,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/stw-app-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/stw-launch-logo.jpg",
+          "imageWidth": 330,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ],
       [
         "expo-camera",
         {

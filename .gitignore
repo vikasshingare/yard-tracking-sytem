@@ -5,4 +5,6 @@ backend/.local-mysql/
 admin/dist/
 mobile/.expo/
 mobile/dist/
+mobile/android/
+Yard-Tracker.apk
 *.log

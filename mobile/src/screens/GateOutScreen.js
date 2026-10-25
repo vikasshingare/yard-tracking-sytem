@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import BarcodeScanner from '../components/BarcodeScanner';
 import useLocationCapture from '../components/LocationCapture';
 import api, { errorMessage } from '../api';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '../components/FormControls';
 
 export default function GateOutScreen() {
   const [inventoryCount, setInventoryCount] = useState(0);
@@ -66,7 +66,9 @@ export default function GateOutScreen() {
         {scannedRecord && <Text style={styles.location}>📍 {scannedRecord.locationName || 'Location not assigned'}</Text>}
       </View>}
       <Text style={styles.step}>2. Choose shipment and exit gate</Text>
+      <Text style={styles.fieldLabel}>SHIPMENT</Text>
       <View style={styles.picker}><Picker selectedValue={shipmentId} onValueChange={setShipmentId}>{shipments.filter(x=>!scannedRecord||scannedRecord===false||Number(x.yardId)===Number(scannedRecord.yardId)).map(x=><Picker.Item key={x.id} label={`${x.shipmentRef} · ${x.activeContainers} containers`} value={String(x.id)}/>)}</Picker></View>
+      <Text style={styles.fieldLabel}>EXIT GATE</Text>
       <View style={styles.picker}><Picker selectedValue={gateId} onValueChange={setGateId}>{gates.filter(x=>(x.direction==='out'||x.direction==='both')&&(!scannedRecord||scannedRecord===false||Number(x.yardId)===Number(scannedRecord.yardId))).map(x=><Picker.Item key={x.id} label={x.gateName} value={String(x.id)}/>)}</Picker></View>
       <Text style={styles.gps}>📍 {gpsMessage}{coords ? `  ${coords.geoLat.toFixed(4)}, ${coords.geoLong.toFixed(4)}` : ''}</Text>
       <Pressable disabled={busy || !scannedRecord} onPress={gateOut} style={[styles.action, (!scannedRecord || busy) && styles.disabled]}>
@@ -86,7 +88,7 @@ const styles = StyleSheet.create({
   countLabel: { fontSize: 15, fontWeight: '800', color: '#53616b' },
   step: { fontSize: 18, fontWeight: '700', color: '#283640' },
   verify: { padding: 16, borderRadius: 14, backgroundColor: 'white', gap: 8 },
-  picker: { backgroundColor: 'white', borderRadius: 12, overflow: 'hidden' },
+  picker: { backgroundColor: 'white', borderWidth: 1.25, borderColor: '#111111', borderRadius: 14, overflow: 'hidden' }, fieldLabel: { marginBottom: -10, fontSize: 13, fontWeight: '900', color: '#53616B', letterSpacing: 0.4 },
   verifyTitle: { fontSize: 19, fontWeight: '900', color: '#16232d' },
   value: { fontSize: 17, fontWeight: '700' }, location: { fontSize: 16, color: '#53616b' },
   gps: { fontSize: 15, color: '#53616b' },
