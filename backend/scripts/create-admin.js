@@ -1,9 +1,11 @@
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
+const fs = require('node:fs');
 
 async function main() {
-  const [displayName, rawEmail, password] = process.argv.slice(2);
+  const [displayName, rawEmail, passwordArg] = process.argv.slice(2);
+  const password = passwordArg || (process.env.ADMIN_PASSWORD_FILE ? fs.readFileSync(process.env.ADMIN_PASSWORD_FILE, 'utf8').trim() : '');
   if (!displayName || !rawEmail || !password || password.length < 10) {
     console.error('Usage: npm run create-admin -- "Yard Admin" admin@example.com "10-character-password"');
     process.exitCode = 1;
