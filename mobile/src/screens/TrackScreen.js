@@ -1,0 +1,13 @@
+import React,{useState} from 'react';
+import {Alert,FlatList,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
+import {Container,Search} from 'lucide-react-native';
+import BarcodeScanner from '../components/BarcodeScanner';
+import api,{errorMessage} from '../api';
+
+export default function TrackScreen({navigation}){const [query,setQuery]=useState(''),[rows,setRows]=useState([]),[busy,setBusy]=useState(false);
+ async function find(value=query){const q=String(value||'').trim();if(!q)return Alert.alert('Scan or enter a code','Search by container number, tracking barcode, or shipment reference.');setQuery(q);setBusy(true);try{const {data}=await api.get('/track',{params:{q}});setRows(data.results||[]);if(!data.results?.length)Alert.alert('No match','No container or shipment was found.');}catch(e){Alert.alert('Search failed',errorMessage(e));}finally{setBusy(false);}}
+ return <View style={s.page}><Text style={s.title}>🔎  FIND CONTAINER</Text><Text style={s.sub}>Scan a Code 128 label or enter a container / shipment number.</Text><BarcodeScanner label="SCAN TO FIND" onScan={find}/><View style={s.search}><TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="Container or shipment code" autoCapitalize="characters"/><Pressable onPress={()=>find()} style={s.button}><Search color="white"/></Pressable></View>{busy&&<Text style={s.sub}>Searching…</Text>}
+ <FlatList data={rows} keyExtractor={x=>String(x.id)} contentContainerStyle={s.list} renderItem={({item})=><Pressable onPress={()=>navigation.navigate('ContainerDetails',{containerId:item.id})} style={s.card}><Container color="#16834a" size={22}/><View style={{flex:1}}><Text style={s.name}>{item.containerNumber||item.originalBarcode}</Text><Text style={s.code}>{item.trackingBarcode}</Text><Text style={s.location}>{item.status.toUpperCase()}  ·  {item.locationName||'No location'}</Text></View><Text style={s.open}>›</Text></Pressable>}/>
+ </View>;
+}
+const s=StyleSheet.create({page:{flex:1,padding:18,gap:13,backgroundColor:'#f4f6f8'},title:{fontSize:25,fontWeight:'900',color:'#16232d'},sub:{fontSize:15,color:'#53616b'},search:{flexDirection:'row',gap:8},input:{flex:1,minHeight:55,borderRadius:12,backgroundColor:'white',paddingHorizontal:14,fontSize:16},button:{width:58,borderRadius:12,backgroundColor:'#1672b8',alignItems:'center',justifyContent:'center'},list:{gap:10,paddingVertical:6},card:{padding:15,borderRadius:13,backgroundColor:'white',flexDirection:'row',alignItems:'center',gap:12},name:{fontSize:16,fontWeight:'900',color:'#20313a'},code:{fontSize:11,color:'#65747b',marginTop:3},location:{fontSize:11,color:'#16834a',fontWeight:'800',marginTop:5},open:{fontSize:25,color:'#8b989e'}});

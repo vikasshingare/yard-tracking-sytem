@@ -1,0 +1,8 @@
+node_modules/
+**/node_modules/
+**/.env
+backend/.local-mysql/
+admin/dist/
+mobile/.expo/
+mobile/dist/
+*.log

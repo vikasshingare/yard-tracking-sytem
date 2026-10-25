@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Yard Tracker",
+    "slug": "yard-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Yard Tracker to scan container and location barcodes."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Yard Tracker to record the yard location for each action."
+        }
+      ],
+      "expo-asset",
+      "expo-secure-store",
+      "expo-sqlite"
+    ]
+  }
+}
