@@ -36,7 +36,8 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT || 3000);
-const server = app.listen(port, () => console.log(`Yard API listening on ${port}`));
+const host = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0');
+const server = app.listen(port, host, () => console.log(`Yard API listening on ${host}:${port}`));
 
 async function shutdown() {
   server.close(async () => {

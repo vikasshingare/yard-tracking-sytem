@@ -104,6 +104,8 @@ To create the first administrator after importing the schema, run `npm run creat
 
 Administrators also have manual gate entry, container master, hierarchical location master (yard, zone, block, row, bay, tier, position, capacity, compatibility and slot status), yard/gate setup, shipment creation and assignment, CSV reports, security audit and role-based user access. The mobile drawer includes paginated inventory and history, container tracking, shipment view, detail timelines and an offline sync queue for gate-in, put-away and move actions. Gate-out is always online and requires a ready shipment and exit gate.
 
+The hosted deployment uses `/yard/` for the admin UI and `/yard-api/api` for the API. Build the admin with `VITE_API_URL=https://your-host/yard-api/api` and `npx vite build --base=/yard/`. Set the mobile `EXPO_PUBLIC_API_URL` to the same API URL before starting Expo or creating a device build. In production the API should bind to loopback behind the HTTPS reverse proxy.
+
 ## Sample records
 
 After creating the first admin, run `npm run seed-samples --prefix backend` from the project root (or `npm run seed-samples` from `backend`). It adds sample containers, movement and shipment history, yard slots, and role accounts. It is safe to rerun; existing container records and user passwords are kept.
