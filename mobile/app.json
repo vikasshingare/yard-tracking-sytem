@@ -2,11 +2,11 @@
   "expo": {
     "name": "Yard Tracker",
     "slug": "yard-tracker",
-    "version": "1.3.1",
+    "version": "1.3.2",
     "icon": "./assets/stw-app-icon.png",
     "android": {
       "package": "com.yardtracker.mobile",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "foregroundImage": "./assets/stw-app-icon.png",
         "backgroundColor": "#FFFFFF"
