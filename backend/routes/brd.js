@@ -1,5 +1,8 @@
 const express = require('express');
 const crypto = require('node:crypto');
+const path = require('node:path');
+const fs = require('node:fs/promises');
+const multer = require('multer');
 const { authenticate, allowRoles, canAccessYard } = require('../middleware/auth');
 const idempotency = require('../middleware/idempotency');
 
@@ -89,14 +92,25 @@ async function checkLocation(conn, locationId, yardId, containerType, excludeCon
   }
   return location;
 }
+async function checkPutAwayAssignee(conn, assignedTo, yardId) {
+  const id=number(assignedTo);
+  if(!id)throw Object.assign(new Error('Assign this container to a Yard Operator for put-away.'),{status:400});
+  const [[user]]=await conn.execute(
+    `SELECT u.id FROM Users u JOIN UserYards uy ON uy.user_id=u.id
+     WHERE u.id=? AND u.role='yard_operator' AND u.is_active=TRUE AND uy.yard_id=? FOR UPDATE`,[id,yardId]);
+  if(!user)throw Object.assign(new Error('Choose an active Yard Operator assigned to this yard.'),{status:400});
+  return id;
+}
 async function fetchContainerDetail(pool, id) {
   const [[container]] = await pool.execute(
     `SELECT c.id,c.yard_id AS yardId,c.original_barcode AS originalBarcode,c.container_number AS containerNumber,
       c.internal_tracking_barcode AS trackingBarcode,c.size_code AS sizeCode,c.type_code AS typeCode,c.iso_code AS isoCode,
       c.shipping_line AS shippingLine,c.seal_number AS sealNumber,c.condition_code AS conditionCode,c.remarks,c.status,
-      c.current_yard_location AS locationId,
+      c.current_yard_location AS locationId,c.putaway_assigned_to AS putawayAssignedTo,
+      putawayUser.display_name AS putawayAssignedToName,
       ${LOCATION_LABEL} AS locationName,c.created_at AS createdAt,c.updated_at AS updatedAt
-     FROM Containers c LEFT JOIN Locations l ON l.id=c.current_yard_location LEFT JOIN Yards y ON y.id=l.yard_id WHERE c.id=?`, [id]);
+     FROM Containers c LEFT JOIN Locations l ON l.id=c.current_yard_location LEFT JOIN Yards y ON y.id=l.yard_id
+     LEFT JOIN Users putawayUser ON putawayUser.id=c.putaway_assigned_to WHERE c.id=?`, [id]);
   if (!container) return null;
   const [events] = await pool.execute(
     `SELECT t.id,t.action_type AS actionType,t.geo_lat AS geoLat,t.geo_long AS geoLong,t.geo_accuracy AS geoAccuracy,
@@ -118,6 +132,27 @@ module.exports = function createBrdRouter(pool) {
   const router = express.Router();
   router.use(authenticate);
   const idem = idempotency(pool);
+  const photoDir = path.resolve(process.env.CONTAINER_PHOTO_DIR ||
+    (process.env.NODE_ENV === 'production' ? '/var/lib/yard-tracking/container-photos' : path.join(__dirname, '..', 'uploads', 'containers')));
+  const photoUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, done) => done(null, photoDir),
+      filename: (req, file, done) => {
+        const extension = ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' })[file.mimetype];
+        if (!extension) return done(new Error('Upload a JPG, PNG, or WebP container photo.'));
+        done(null, 'container-' + req.params.id + '-' + crypto.randomUUID() + extension);
+      },
+    }),
+    limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+    fileFilter: (_req, file, done) => done(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
+  });
+  function uploadContainerPhoto(req, res, next) {
+    photoUpload.single('photo')(req, res, (err) => {
+      if (err) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Photo must be 8 MB or smaller.' : err.message });
+      if (!req.file) return res.status(400).json({ error: 'Choose a JPG, PNG, or WebP photo.' });
+      next();
+    });
+  }
 
   router.get('/yards', async (req, res, next) => {
     try {
@@ -133,6 +168,17 @@ module.exports = function createBrdRouter(pool) {
       const [rows] = await pool.execute(`SELECT g.id,g.yard_id AS yardId,g.gate_code AS gateCode,g.gate_name AS gateName,g.direction FROM Gates g WHERE g.is_active=TRUE${scope.sql}${gateScope} ORDER BY g.gate_name`, [...scope.params,...(gateScope?req.user.gateIds:[])]);
       res.json(rows);
     } catch (err) { next(err); }
+  });
+  router.get('/yard-operators', allowRoles('gate_operator','supervisor','admin'), async (req,res,next)=>{
+    try {
+      const yardId=await defaultYard(pool,req.user,req.query.yardId);
+      const [rows]=await pool.execute(
+        `SELECT u.id,u.display_name AS displayName FROM Users u
+         JOIN UserYards uy ON uy.user_id=u.id
+         WHERE u.role='yard_operator' AND u.is_active=TRUE AND uy.yard_id=?
+         ORDER BY u.display_name`,[yardId]);
+      res.json(rows);
+    } catch(err) { if(err.status)return res.status(err.status).json({error:err.message}); next(err); }
   });
   router.get('/locations', async (req, res, next) => {
     try {
@@ -168,6 +214,21 @@ module.exports = function createBrdRouter(pool) {
       res.json({ rows, page, limit, total: Number(total) });
     } catch (err) { next(err); }
   });
+  router.get('/put-away/tasks', allowRoles('yard_operator','supervisor','admin'), async(req,res,next)=>{
+    try {
+      const scope=accessFilter(req.user,'c',req.query.yardId);
+      const assignedClause=req.user.role==='yard_operator'?' AND (c.putaway_assigned_to=? OR c.putaway_assigned_to IS NULL)':'';
+      const params=[...scope.params,...(req.user.role==='yard_operator'?[req.user.id]:[])];
+      const [rows]=await pool.execute(
+        `SELECT c.id,c.container_number AS containerNumber,c.original_barcode AS originalBarcode,
+          c.internal_tracking_barcode AS trackingBarcode,c.yard_id AS yardId,c.putaway_assigned_to AS assignedTo,
+          u.display_name AS assignedToName,c.created_at AS createdAt
+         FROM Containers c LEFT JOIN Users u ON u.id=c.putaway_assigned_to
+         WHERE c.status='awaiting_putaway'${scope.sql}${assignedClause}
+         ORDER BY (c.putaway_assigned_to IS NULL),c.created_at LIMIT 100`,params);
+      res.json(rows);
+    } catch(err) { next(err); }
+  });
 
   router.get('/history', async (req, res, next) => {
     try {
@@ -201,6 +262,43 @@ module.exports = function createBrdRouter(pool) {
       if(!canAccessYard(req.user,record.yardId))return res.status(403).json({error:'You cannot view this yard record.'});
       res.json(record);
     }catch(err){next(err);}
+  });
+  router.post('/containers/:id/photos',allowRoles('gate_operator','yard_operator','supervisor','admin'),uploadContainerPhoto,async(req,res,next)=>{
+    const id=number(req.params.id);
+    if(!id){await fs.unlink(req.file.path).catch(()=>{});return res.status(400).json({error:'Invalid container.'});}
+    try {
+      const [[container]]=await pool.execute('SELECT id,yard_id FROM Containers WHERE id=?',[id]);
+      if(!container){await fs.unlink(req.file.path).catch(()=>{});return res.status(404).json({error:'Container not found.'});}
+      if(!canAccessYard(req.user,Number(container.yard_id))){await fs.unlink(req.file.path).catch(()=>{});return res.status(403).json({error:'You cannot attach a photo to this yard.'});}
+      const [created]=await pool.execute(
+        'INSERT INTO ContainerPhotos (container_id,file_name,mime_type,size_bytes,uploaded_by) VALUES (?,?,?,?,?)',
+        [id,req.file.filename,req.file.mimetype,req.file.size,req.user.id]);
+      await pool.execute('INSERT INTO AuditLogs (user_id,action,record_type,record_id,change_metadata) VALUES (?,?,?,?,?)',
+        [req.user.id,'Container photo uploaded','container',id,JSON.stringify({photoId:created.insertId,fileName:req.file.filename})]);
+      res.status(201).json({id:created.insertId,containerId:id,mimeType:req.file.mimetype,sizeBytes:req.file.size,createdAt:new Date().toISOString()});
+    } catch(err) { await fs.unlink(req.file.path).catch(()=>{}); next(err); }
+  });
+  router.get('/containers/:id/photos',async(req,res,next)=>{
+    try {
+      const id=number(req.params.id);if(!id)return res.status(400).json({error:'Invalid container.'});
+      const [[container]]=await pool.execute('SELECT id,yard_id FROM Containers WHERE id=?',[id]);
+      if(!container)return res.status(404).json({error:'Container not found.'});
+      if(!canAccessYard(req.user,Number(container.yard_id)))return res.status(403).json({error:'You cannot view this yard.'});
+      const [rows]=await pool.execute(
+        'SELECT p.id,p.mime_type AS mimeType,p.size_bytes AS sizeBytes,p.created_at AS createdAt,u.display_name AS uploadedBy FROM ContainerPhotos p LEFT JOIN Users u ON u.id=p.uploaded_by WHERE p.container_id=? ORDER BY p.created_at DESC',
+        [id]);
+      res.json(rows);
+    } catch(err) { next(err); }
+  });
+  router.get('/container-photos/:photoId',async(req,res,next)=>{
+    try {
+      const id=number(req.params.photoId);if(!id)return res.status(400).json({error:'Invalid photo.'});
+      const [[photo]]=await pool.execute(
+        'SELECT p.file_name AS fileName,p.mime_type AS mimeType,c.yard_id AS yardId FROM ContainerPhotos p JOIN Containers c ON c.id=p.container_id WHERE p.id=?',[id]);
+      if(!photo)return res.status(404).json({error:'Photo not found.'});
+      if(!canAccessYard(req.user,Number(photo.yardId)))return res.status(403).json({error:'You cannot view this yard.'});
+      res.type(photo.mimeType).sendFile(path.join(req.app.locals.containerPhotoDir,photo.fileName));
+    } catch(err) { next(err); }
   });
   router.get('/admin/containers/:id',allowRoles('admin','supervisor','viewer'),async(req,res,next)=>{
     try{const id=number(req.params.id);if(!id)return res.status(400).json({error:'Invalid container.'});const record=await fetchContainerDetail(pool,id);if(!record)return res.status(404).json({error:'Container not found.'});if(!canAccessYard(req.user,record.yardId))return res.status(403).json({error:'You cannot view this yard record.'});res.json(record);}catch(err){next(err);}
@@ -258,26 +356,24 @@ module.exports = function createBrdRouter(pool) {
       const containerNumber=clean(req.body.containerNumber||originalBarcode,80);
       if(!originalBarcode||!containerNumber)return res.status(400).json({error:'Scan or enter a container number.'});
       geo(req.body,true);const yardId=await defaultYard(pool,req.user,req.body.yardId);
-      const locationId=req.body.locationId?number(req.body.locationId):null;
+      const assignedTo=number(req.body.assignedTo);
       conn=await pool.getConnection();await conn.beginTransaction();
       const gateId=await gateFor(conn,req.body.gateId,yardId,'in',req.user);
-      if(locationId)await checkLocation(conn,locationId,yardId,req.body.typeCode||null);
+      const putawayAssignee=await checkPutAwayAssignee(conn,assignedTo,yardId);
       const trackingBarcode=`YRD-${crypto.randomUUID().toUpperCase()}`;
       const [created]=await conn.execute(
-        `INSERT INTO Containers (original_barcode,container_number,internal_tracking_barcode,size_code,type_code,iso_code,shipping_line,seal_number,condition_code,remarks,status,yard_id,current_yard_location)
-         VALUES (?,?,?,?,?,?,?,?,?,?,'awaiting_putaway',?,NULL)`,
+        `INSERT INTO Containers (original_barcode,container_number,internal_tracking_barcode,size_code,type_code,iso_code,shipping_line,seal_number,condition_code,remarks,status,yard_id,putaway_assigned_to,current_yard_location)
+         VALUES (?,?,?,?,?,?,?,?,?,?,'awaiting_putaway',?,?,NULL)`,
         [originalBarcode,containerNumber,trackingBarcode,clean(req.body.sizeCode,30)||null,clean(req.body.typeCode,40)||null,
           clean(req.body.isoCode,20)||null,clean(req.body.shippingLine,100)||null,clean(req.body.sealNumber,100)||null,
-          ['good','damaged','inspection_required','unknown'].includes(req.body.conditionCode)?req.body.conditionCode:'unknown',clean(req.body.remarks,1000)||null,yardId]);
+          ['good','damaged','inspection_required','unknown'].includes(req.body.conditionCode)?req.body.conditionCode:'unknown',clean(req.body.remarks,1000)||null,yardId,putawayAssignee]);
       await conn.execute('INSERT INTO GateTransactions (container_id,gate_id,direction,operator_id,geo_lat,geo_long,geo_accuracy,remarks) VALUES (?,? ,\'in\',?,?,?,?,?)',
         [created.insertId,gateId,req.user.id,req.body.geoLat??null,req.body.geoLong??null,req.body.geoAccuracy??null,clean(req.body.sourceReference||req.body.remarks,255)||null]);
-      await logEvent(conn,{containerId:created.insertId,userId:req.user.id,action:'Gate In',gateId,body:req.body,details:{containerNumber,sizeCode:req.body.sizeCode,typeCode:req.body.typeCode,conditionCode:req.body.conditionCode,sourceReference:req.body.sourceReference}});
-      if(locationId){
-        await conn.execute("UPDATE Containers SET current_yard_location=?,status='in-yard' WHERE id=?",[locationId,created.insertId]);
-        await logEvent(conn,{containerId:created.insertId,userId:req.user.id,action:'Put Away',toLocationId:locationId,body:req.body,details:{origin:'gate-in-register'}});
-      }
+      await logEvent(conn,{containerId:created.insertId,userId:req.user.id,action:'Gate In',gateId,body:req.body,details:{containerNumber,sizeCode:req.body.sizeCode,typeCode:req.body.typeCode,conditionCode:req.body.conditionCode,sourceReference:req.body.sourceReference,putawayAssignedTo:putawayAssignee}});
+      await conn.execute('INSERT INTO AuditLogs (user_id,action,record_type,record_id,change_metadata) VALUES (?,?,?,?,?)',
+        [req.user.id,'Put-away assigned','container',created.insertId,JSON.stringify({assignedTo:putawayAssignee})]);
       await conn.commit();
-      res.status(201).json({message:'Gate-in recorded.',containerId:created.insertId,containerNumber,originalBarcode,trackingBarcode,status:locationId?'in-yard':'awaiting_putaway',locationId});
+      res.status(201).json({message:'Gate Entry saved and Put-away assigned.',containerId:created.insertId,containerNumber,originalBarcode,trackingBarcode,status:'awaiting_putaway',assignedTo:putawayAssignee});
     }catch(err){if(conn)await conn.rollback();if(err.code==='ER_DUP_ENTRY')return res.status(409).json({error:'This container number or barcode is already registered.'});if(err.status)return res.status(err.status).json({error:err.message});next(err);}
     finally{conn?.release();}
   });
@@ -287,12 +383,13 @@ module.exports = function createBrdRouter(pool) {
       const barcode=clean(req.body.trackingBarcode||req.body.containerNumber,160);const locationId=number(req.body.locationId);
       if(!barcode||!locationId)return res.status(400).json({error:'Scan a container and select its destination slot.'});geo(req.body);
       conn=await pool.getConnection();await conn.beginTransaction();
-      const [[container]]=await conn.execute('SELECT id,yard_id,status,current_yard_location,type_code FROM Containers WHERE internal_tracking_barcode=? OR container_number=? FOR UPDATE',[barcode,barcode]);
+      const [[container]]=await conn.execute('SELECT id,yard_id,status,current_yard_location,type_code,putaway_assigned_to FROM Containers WHERE internal_tracking_barcode=? OR container_number=? FOR UPDATE',[barcode,barcode]);
       if(!container){await conn.rollback();return res.status(404).json({error:'Container not found.'});}
       if(!canAccessYard(req.user,Number(container.yard_id))){await conn.rollback();return res.status(403).json({error:'You cannot operate in this yard.'});}
+      if(container.putaway_assigned_to&&Number(container.putaway_assigned_to)!==Number(req.user.id)&&!['admin','supervisor'].includes(req.user.role)){await conn.rollback();return res.status(403).json({error:'This Put-away task is assigned to another Yard Operator.'});}
       if(container.status!=='awaiting_putaway'||container.current_yard_location!==null){await conn.rollback();return res.status(409).json({error:'This container is not waiting for put-away.'});}
       await checkLocation(conn,locationId,container.yard_id,container.type_code);
-      await conn.execute("UPDATE Containers SET current_yard_location=?,status='in-yard' WHERE id=?",[locationId,container.id]);
+      await conn.execute("UPDATE Containers SET current_yard_location=?,status='in-yard',putaway_assigned_to=NULL WHERE id=?",[locationId,container.id]);
       await logEvent(conn,{containerId:container.id,userId:req.user.id,action:'Put Away',toLocationId:locationId,body:req.body});
       await conn.commit();res.json({message:'Put-away confirmed.',containerId:container.id,locationId,status:'in-yard'});
     }catch(err){if(conn)await conn.rollback();if(err.status)return res.status(err.status).json({error:err.message});next(err);}finally{conn?.release();}
@@ -453,23 +550,22 @@ module.exports = function createBrdRouter(pool) {
       const containerNumber=clean(req.body.containerNumber||originalBarcode,80);
       if(!originalBarcode||!containerNumber)return res.status(400).json({error:'Enter a container number or original barcode.'});
       geo(req.body);const yardId=await defaultYard(pool,req.user,req.body.yardId);
-      const locationId=req.body.locationId?number(req.body.locationId):null;
+      const assignedTo=number(req.body.assignedTo);
       conn=await pool.getConnection();await conn.beginTransaction();
       const gateId=await gateFor(conn,req.body.gateId,yardId,'in',req.user);
-      if(locationId)await checkLocation(conn,locationId,yardId,req.body.typeCode||null);
+      const putawayAssignee=await checkPutAwayAssignee(conn,assignedTo,yardId);
       const trackingBarcode=`YRD-${crypto.randomUUID().toUpperCase()}`;
       const [created]=await conn.execute(`INSERT INTO Containers
-        (original_barcode,container_number,internal_tracking_barcode,size_code,type_code,iso_code,shipping_line,seal_number,condition_code,remarks,status,yard_id,current_yard_location)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'awaiting_putaway',?,NULL)`,
+        (original_barcode,container_number,internal_tracking_barcode,size_code,type_code,iso_code,shipping_line,seal_number,condition_code,remarks,status,yard_id,putaway_assigned_to,current_yard_location)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'awaiting_putaway',?,?,NULL)`,
         [originalBarcode,containerNumber,trackingBarcode,clean(req.body.sizeCode,30)||null,clean(req.body.typeCode,40)||null,
           clean(req.body.isoCode,20)||null,clean(req.body.shippingLine,100)||null,clean(req.body.sealNumber,100)||null,
-          ['good','damaged','inspection_required','unknown'].includes(req.body.conditionCode)?req.body.conditionCode:'unknown',clean(req.body.remarks,1000)||null,yardId]);
+          ['good','damaged','inspection_required','unknown'].includes(req.body.conditionCode)?req.body.conditionCode:'unknown',clean(req.body.remarks,1000)||null,yardId,putawayAssignee]);
       await conn.execute(`INSERT INTO GateTransactions (container_id,gate_id,direction,operator_id,geo_lat,geo_long,geo_accuracy,remarks)
         VALUES (?,?,'in',?,?,?,?,?)`,[created.insertId,gateId,req.user.id,req.body.geoLat??null,req.body.geoLong??null,req.body.geoAccuracy??null,clean(req.body.remarks,255)||'Admin manual gate entry']);
-      await logEvent(conn,{containerId:created.insertId,userId:req.user.id,action:'Gate In',gateId,body:req.body,details:{origin:'admin-panel',containerNumber}});
-      if(locationId){await conn.execute("UPDATE Containers SET current_yard_location=?,status='in-yard' WHERE id=?",[locationId,created.insertId]);await logEvent(conn,{containerId:created.insertId,userId:req.user.id,action:'Put Away',toLocationId:locationId,body:req.body,details:{origin:'admin-panel'}});}
-      await conn.execute('INSERT INTO AuditLogs (user_id,action,record_type,record_id,change_metadata) VALUES (?,?,?,?,?)',[req.user.id,'Manual gate entry created','container',created.insertId,JSON.stringify({yardId,locationId,containerNumber})]);
-      await conn.commit();res.status(201).json({message:'Gate-in recorded.',containerId:created.insertId,containerNumber,originalBarcode,trackingBarcode,status:locationId?'in-yard':'awaiting_putaway',locationId});
+      await logEvent(conn,{containerId:created.insertId,userId:req.user.id,action:'Gate In',gateId,body:req.body,details:{origin:'admin-panel',containerNumber,putawayAssignedTo:putawayAssignee}});
+      await conn.execute('INSERT INTO AuditLogs (user_id,action,record_type,record_id,change_metadata) VALUES (?,?,?,?,?)',[req.user.id,'Gate Entry created and Put-away assigned','container',created.insertId,JSON.stringify({yardId,assignedTo:putawayAssignee,containerNumber})]);
+      await conn.commit();res.status(201).json({message:'Gate Entry saved and Put-away assigned.',containerId:created.insertId,containerNumber,originalBarcode,trackingBarcode,status:'awaiting_putaway',assignedTo:putawayAssignee});
     }catch(err){if(conn)await conn.rollback();if(err.code==='ER_DUP_ENTRY')return res.status(409).json({error:'This container number or barcode is already registered.'});if(err.status)return res.status(err.status).json({error:err.message});next(err);}
     finally{conn?.release();}
   });

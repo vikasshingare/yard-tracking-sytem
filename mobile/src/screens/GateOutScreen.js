@@ -4,12 +4,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import BarcodeScanner from '../components/BarcodeScanner';
 import useLocationCapture from '../components/LocationCapture';
 import api, { errorMessage } from '../api';
-import { Picker } from '../components/FormControls';
+import { Picker, TextInput } from '../components/FormControls';
+import { Pencil } from 'lucide-react-native';
 
 export default function GateOutScreen() {
   const [inventoryCount, setInventoryCount] = useState(0);
   const [scannedRecord, setScannedRecord] = useState(null);
   const [trackingBarcode, setTrackingBarcode] = useState('');
+  const [ocrLocked,setOcrLocked]=useState(false);
   const [busy, setBusy] = useState(false);
   const [shipments, setShipments] = useState([]); const [gates, setGates] = useState([]);
   const [shipmentId, setShipmentId] = useState(''); const [gateId, setGateId] = useState('');
@@ -39,17 +41,17 @@ export default function GateOutScreen() {
       if(!gps){Alert.alert('GPS required','Turn on location and allow Yard Tracker to record gate exit.');return;}
       const { data } = await api.post('/gate-out', { trackingBarcode, shipmentId:Number(shipmentId), gateId:Number(gateId), ...(gps || {}) });
       Alert.alert('EXIT SAVED', data.message);
-      setTrackingBarcode(''); setScannedRecord(null);
+      setTrackingBarcode(''); setScannedRecord(null);setOcrLocked(false);
       loadInventory();
     } catch (error) { Alert.alert('Exit not recorded', errorMessage(error)); }
     finally { setBusy(false); }
   }
 
-  async function verifyScan(value) {
-    setTrackingBarcode(value); setScannedRecord(null);
+  async function verifyScan(value,fromOcr=false) {
+    setTrackingBarcode(value); setScannedRecord(null);setOcrLocked(fromOcr);
     try {
       const { data } = await api.get('/inventory', { params: { page: 1, limit: 1, search: value } });
-      const record=data.rows.find((item) => item.trackingBarcode === value)||false;setScannedRecord(record);
+      const record=data.rows.find((item) => item.trackingBarcode === value||item.containerNumber===value||item.originalBarcode===value)||false;setScannedRecord(record);
       if(record){const yardShipments=shipments.filter(x=>Number(x.yardId)===Number(record.yardId)&&x.status==='ready');const yardGates=gates.filter(x=>Number(x.yardId)===Number(record.yardId)&&(x.direction==='out'||x.direction==='both'));setShipmentId(yardShipments.length?String(yardShipments[0].id):'');setGateId(yardGates.length?String(yardGates[0].id):'');}
     } catch { setScannedRecord(false); }
   }
@@ -58,8 +60,10 @@ export default function GateOutScreen() {
     <ScrollView contentContainerStyle={styles.page}>
       <Text style={styles.title}>🚪  CONTAINER EXIT</Text>
       <View style={styles.count}><Text style={styles.countNumber}>{inventoryCount}</Text><Text style={styles.countLabel}>CONTAINERS IN YARD</Text></View>
-      <Text style={styles.step}>1. Scan tracking code to verify</Text>
-      <BarcodeScanner label="SCAN CODE 128 FOR EXIT" barcodeTypes={['code128']} onScan={verifyScan} />
+      <Text style={styles.step}>1. Scan, photograph, or enter tracking code</Text>
+      <BarcodeScanner label="SCAN CODE 128 FOR EXIT" barcodeTypes={['code128']} allowPhotoCapture onScan={value=>verifyScan(value,false)} onTextRecognized={value=>verifyScan(value,true)} />
+      <View style={styles.entryInputRow}><TextInput style={styles.containerInput} placeholder="Tracking barcode or container number" value={trackingBarcode} onChangeText={value=>{setTrackingBarcode(value.toUpperCase());setScannedRecord(null);setOcrLocked(false);}} editable={!ocrLocked} autoCapitalize="characters" autoCorrect={false} onEndEditing={event=>{if(event.nativeEvent.text.trim())verifyScan(event.nativeEvent.text.trim(),ocrLocked);}}/>{ocrLocked&&<Pressable style={styles.editButton} onPress={()=>{setOcrLocked(false);setScannedRecord(null);}}><Pencil size={17} color="white"/><Text style={styles.editText}>EDIT</Text></Pressable>}</View>
+      {ocrLocked&&<Text style={styles.ocrHint}>Photo read · tap EDIT to correct the code.</Text>}
       {!!trackingBarcode && <View style={styles.verify}>
         <Text style={styles.verifyTitle}>{scannedRecord ? '✅ CONTAINER IN YARD' : scannedRecord === false ? '⚠ NOT IN INVENTORY' : 'CHECKING CODE…'}</Text>
         <Text style={styles.value}>{trackingBarcode}</Text>
@@ -87,6 +91,7 @@ const styles = StyleSheet.create({
   countNumber: { fontSize: 38, fontWeight: '900', color: '#16232d' },
   countLabel: { fontSize: 15, fontWeight: '800', color: '#53616b' },
   step: { fontSize: 18, fontWeight: '700', color: '#283640' },
+  entryInputRow:{flexDirection:'row',alignItems:'center',gap:8},containerInput:{flex:1},editButton:{minHeight:54,paddingHorizontal:13,borderRadius:12,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:6,backgroundColor:'#1769AA'},editText:{color:'white',fontSize:14,fontWeight:'900'},ocrHint:{marginTop:-10,color:'#53616b',fontSize:13},
   verify: { padding: 16, borderRadius: 14, backgroundColor: 'white', gap: 8 },
   picker: { backgroundColor: 'white', borderWidth: 1.25, borderColor: '#111111', borderRadius: 14, overflow: 'hidden' }, fieldLabel: { marginBottom: -10, fontSize: 13, fontWeight: '900', color: '#53616B', letterSpacing: 0.4 },
   verifyTitle: { fontSize: 19, fontWeight: '900', color: '#16232d' },

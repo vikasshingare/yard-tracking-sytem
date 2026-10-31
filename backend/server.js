@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
+const fs = require('node:fs');
+const path = require('node:path');
 const createYardRouter = require('./routes/yard');
 const createAuthRouter = require('./routes/auth');
 const createBrdRouter = require('./routes/brd');
@@ -11,6 +13,10 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 }
 
 const app = express();
+const containerPhotoDir = path.resolve(process.env.CONTAINER_PHOTO_DIR ||
+  (process.env.NODE_ENV === 'production' ? '/var/lib/yard-tracking/container-photos' : path.join(__dirname, 'uploads', 'containers')));
+fs.mkdirSync(containerPhotoDir, { recursive: true });
+app.locals.containerPhotoDir = containerPhotoDir;
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
   port: Number(process.env.DB_PORT || 3306),

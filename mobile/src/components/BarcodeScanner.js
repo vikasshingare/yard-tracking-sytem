@@ -24,7 +24,9 @@ export default function BarcodeScanner({
   label = 'SCAN BARCODE',
   barcodeTypes = ALL_BARCODE_TYPES,
   allowPhotoCapture = false,
+  allowContainerPhoto = false,
   onTextRecognized,
+  onPhotoCaptured,
 }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraMode, setCameraMode] = useState(null);
@@ -38,6 +40,12 @@ export default function BarcodeScanner({
     try {
       const photo = await cameraRef.current?.takePictureAsync({ quality: 0.9, skipProcessing: false });
       if (!photo?.uri) throw new Error('The camera could not capture the image. Try again.');
+      if (cameraMode === 'container-photo') {
+        setCameraMode(null);
+        onPhotoCaptured?.(photo.uri);
+        Alert.alert('PHOTO CAPTURED', 'Container photo will be attached to the Gate Entry.');
+        return;
+      }
       const recognized = await TextRecognition.recognize(photo.uri);
       const containerNumber = findContainerNumber(recognized?.text);
       setCameraMode(null);
@@ -66,12 +74,12 @@ export default function BarcodeScanner({
     <>
       <Pressable
         style={styles.button}
-        onPress={() => allowPhotoCapture ? setShowOptions(true) : setCameraMode('scan')}
+        onPress={() => (allowPhotoCapture || allowContainerPhoto) ? setShowOptions(true) : setCameraMode('scan')}
         accessibilityRole="button"
       >
         <Text style={styles.buttonText}>▦  {label}</Text>
       </Pressable>
-      {allowPhotoCapture && <Modal visible={showOptions} transparent animationType="fade" onRequestClose={() => setShowOptions(false)}>
+      {(allowPhotoCapture || allowContainerPhoto) && <Modal visible={showOptions} transparent animationType="fade" onRequestClose={() => setShowOptions(false)}>
         <View style={styles.optionOverlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowOptions(false)} accessibilityLabel="Close camera options" />
           <View style={styles.optionCard}>
@@ -80,9 +88,12 @@ export default function BarcodeScanner({
             <Pressable style={styles.scanOption} onPress={() => { setShowOptions(false); setCameraMode('scan'); }}>
               <Text style={styles.optionButtonText}>▦  SCAN BARCODE</Text>
             </Pressable>
-            <Pressable style={styles.photoOption} onPress={() => { setShowOptions(false); setCameraMode('photo'); }}>
-              <Text style={styles.optionButtonText}>📷  CAPTURE LABEL PHOTO</Text>
-            </Pressable>
+            {allowPhotoCapture && <Pressable style={styles.photoOption} onPress={() => { setShowOptions(false); setCameraMode('photo'); }}>
+              <Text style={styles.optionButtonText}>📷  READ NUMBER FROM PHOTO</Text>
+            </Pressable>}
+            {allowContainerPhoto && <Pressable style={styles.containerPhotoOption} onPress={() => { setShowOptions(false); setCameraMode('container-photo'); }}>
+              <Text style={styles.optionButtonText}>📸  TAKE CONTAINER PHOTO</Text>
+            </Pressable>}
             <Pressable style={styles.dismiss} onPress={() => setShowOptions(false)}>
               <Text style={styles.dismissText}>CANCEL</Text>
             </Pressable>
@@ -109,9 +120,9 @@ export default function BarcodeScanner({
         <Text style={styles.hint}>Point the camera at the barcode.</Text>
       ) : (
         <>
-          <Text style={styles.hint}>Fill the frame with the container number.</Text>
+          <Text style={styles.hint}>{cameraMode === 'photo' ? 'Fill the frame with the container number.' : 'Frame the full container for the entry photo.'}</Text>
           <Pressable style={[styles.capture, capturing && styles.captureDisabled]} disabled={capturing} onPress={readContainerPhoto}>
-            <Text style={styles.captureText}>{capturing ? 'READING PHOTO…' : '●  TAKE PHOTO & READ'}</Text>
+            <Text style={styles.captureText}>{capturing ? (cameraMode === 'photo' ? 'READING PHOTO…' : 'SAVING PHOTO…') : cameraMode === 'photo' ? '●  TAKE PHOTO & READ' : '●  CAPTURE PHOTO'}</Text>
           </Pressable>
         </>
       )}
@@ -138,6 +149,7 @@ const styles = StyleSheet.create({
   optionHint: { color: '#53616b', fontSize: 15, marginBottom: 3 },
   scanOption: { minHeight: 62, justifyContent: 'center', alignItems: 'center', backgroundColor: '#17212b', borderRadius: 13 },
   photoOption: { minHeight: 62, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1769AA', borderRadius: 13 },
+  containerPhotoOption: { minHeight: 62, justifyContent: 'center', alignItems: 'center', backgroundColor: '#16834a', borderRadius: 13 },
   optionButtonText: { color: 'white', fontSize: 18, fontWeight: '900' },
   dismiss: { minHeight: 48, justifyContent: 'center', alignItems: 'center', borderRadius: 12, backgroundColor: '#EEF2F5' },
   dismissText: { color: '#17212b', fontWeight: '900', fontSize: 16 },

@@ -58,6 +58,7 @@ export default function ContainerDetailsScreen() {
         <Text style={styles.masterLine}>SIZE / TYPE  ·  {record.sizeCode || '—'} / {record.typeCode || '—'}</Text>
         <Text style={styles.masterLine}>ISO / LINE  ·  {record.isoCode || '—'} / {record.shippingLine || '—'}</Text>
         <Text style={styles.masterLine}>SEAL / CONDITION  ·  {record.sealNumber || '—'} / {(record.conditionCode || 'unknown').replaceAll('_', ' ')}</Text>
+        {record.putawayAssignedToName&&<Text style={styles.masterLine}>PUT-AWAY OPERATOR  ·  {record.putawayAssignedToName}</Text>}
         {record.shipment?.shipmentRef && <Text style={styles.masterLine}>SHIPMENT  ·  {record.shipment.shipmentRef}</Text>}
       </View>
 

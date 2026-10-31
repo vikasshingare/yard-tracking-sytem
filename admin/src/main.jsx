@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
 import JsBarcode from 'jsbarcode';
+import { createWorker } from 'tesseract.js';
 import Operations from './Operations';
-import { Activity, ArrowDownRight, ArrowUpRight, Box, ChevronLeft, ChevronRight, CircleUserRound, ClipboardPlus, Clock3, Container, History, Layers3, LogOut, MapPin, MapPinned, PackageCheck, Plus, Printer, RefreshCw, Search, ShieldCheck, Truck, Users, X } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Box, ChevronLeft, ChevronRight, CircleUserRound, ClipboardPlus, Clock3, Container, History, Layers3, LogOut, MapPin, MapPinned, PackageCheck, Pencil, Plus, Printer, RefreshCw, Search, ShieldCheck, Truck, Users, X } from 'lucide-react';
 import './style.css';
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api' });
@@ -15,6 +16,16 @@ api.interceptors.request.use((config) => {
 const roleLabels = { yard_operator: 'Yard operator', gate_operator: 'Gate operator', shipment_operator: 'Shipment operator', supervisor: 'Supervisor', viewer: 'Viewer', admin: 'Administrator' };
 const errorText = (error) => error?.response?.data?.error || 'Could not connect to the yard server.';
 const dateText = (value) => value ? new Date(value).toLocaleString() : '—';
+function containerNumberFromText(text) {
+  const compact=String(text||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const fixes={O:'0',Q:'0',D:'0',I:'1',L:'1',Z:'2',S:'5',G:'6',B:'8'};
+  for(let i=0;i<=compact.length-11;i++){
+    const owner=compact.slice(i,i+4);if(!/^[A-Z]{4}$/.test(owner))continue;
+    const serial=compact.slice(i+4,i+11).replace(/[A-Z]/g,ch=>fixes[ch]||ch);
+    if(/^\d{7}$/.test(serial))return owner+serial;
+  }
+  return '';
+}
 
 function Login({ onLogin }) {
   const [email, setEmail] = useState(''); const [password, setPassword] = useState('');
@@ -49,8 +60,11 @@ function App() {
   const [gates,setGates]=useState([]);
   const [notice, setNotice] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [newUser, setNewUser] = useState({ displayName: '', email: '', password: '', role: 'yard_operator', yardIds: [],gateIds:[] });
-  const [manualEntry, setManualEntry] = useState({ originalBarcode: '', containerNumber:'',sizeCode:'40ft',typeCode:'general',isoCode:'',shippingLine:'',sealNumber:'',conditionCode:'good',locationId: '' });
+  const [manualEntry, setManualEntry] = useState({ originalBarcode: '', containerNumber:'',sizeCode:'40ft',typeCode:'general',isoCode:'',shippingLine:'',sealNumber:'',conditionCode:'good',yardId:'',gateId:'',assignedTo:'' });
   const [createdEntry, setCreatedEntry] = useState(null);
+  const [entryPhoto,setEntryPhoto]=useState(null);const [entryPhotoPreview,setEntryPhotoPreview]=useState('');const [entryPhotoBusy,setEntryPhotoBusy]=useState(false);const [entryOcrLocked,setEntryOcrLocked]=useState(false);
+  const [photoUploadTarget,setPhotoUploadTarget]=useState(null);
+  const [yardOperators,setYardOperators]=useState([]);
   const [newLocation, setNewLocation] = useState({ zoneName: '', blockName: '', rowName: '', bayName:'01', tierName:'01', positionName: '', capacity:'1', status:'available', compatibleTypes:'' });
   const [yards, setYards] = useState([]);
   const pageCount = Math.max(1, Math.ceil(total / 25));
@@ -64,7 +78,7 @@ function App() {
     }).catch(() => localStorage.removeItem('yard_admin_token')).finally(() => setAuthReady(true));
   }, []);
 
-  useEffect(() => { if(user){api.get(user.role==='admin'?'/admin/yards':'/yards').then(({data})=>{setYards(data);if(data.length)setNewUser(x=>({...x,yardIds:x.yardIds.length?x.yardIds:[Number(data[0].id)]}));}).catch(e=>setError(errorText(e)));api.get('/gates').then(({data})=>setGates(data)).catch(e=>setError(errorText(e)));} }, [user]);
+  useEffect(() => { if(user){api.get(user.role==='admin'?'/admin/yards':'/yards').then(({data})=>{setYards(data);if(data.length){setNewUser(x=>({...x,yardIds:x.yardIds.length?x.yardIds:[Number(data[0].id)]}));setManualEntry(x=>({...x,yardId:x.yardId||String(data[0].id)}));}}).catch(e=>setError(errorText(e)));api.get('/gates').then(({data})=>setGates(data)).catch(e=>setError(errorText(e)));} }, [user]);
 
   async function loadData() {
     if (!user) return;
@@ -84,10 +98,11 @@ function App() {
   }
   useEffect(() => { loadData(); }, [user, view, page, search, status, actionType]);
   useEffect(() => { if (user && view === 'users' && user.role === 'admin') api.get('/admin/users').then(({data})=>setUsers(data)).catch(e=>setError(errorText(e))); }, [user, view]);
-  useEffect(() => { if (user && ['manual', 'locations'].includes(view)) api.get('/admin/locations').then(({data})=>setLocations(data)).catch(e=>setError(errorText(e))); }, [user, view]);
+  useEffect(() => { if (user && ['manual', 'locations'].includes(view)) api.get('/admin/locations',{params:view==='manual'&&manualEntry.yardId?{yardId:manualEntry.yardId}:{}}).then(({data})=>setLocations(data)).catch(e=>setError(errorText(e))); }, [user, view, manualEntry.yardId]);
+  useEffect(() => { if(user&&view==='manual'&&manualEntry.yardId){api.get('/yard-operators',{params:{yardId:manualEntry.yardId}}).then(({data})=>{setYardOperators(data);setManualEntry(x=>({...x,assignedTo:data.some(y=>String(y.id)===String(x.assignedTo))?x.assignedTo:(data[0]?String(data[0].id):'')}));}).catch(e=>{setYardOperators([]);setError(errorText(e));});}},[user,view,manualEntry.yardId]);
 
   async function showRecord(record) {
-    try { const {data} = await api.get(`/admin/containers/${record.id}`); setSelected({...data,transactions:(data.events||[]).map(e=>({...e,fromLocation:[e.fromZone,e.fromBlock,e.fromRow].filter(Boolean).join(' / '),toLocation:[e.toZone,e.toBlock,e.toRow].filter(Boolean).join(' / ')}))}); }
+    try { const [{data},photos] = await Promise.all([api.get(`/admin/containers/${record.id}`),api.get(`/containers/${record.id}/photos`)]); setSelected({...data,photos:photos.data,transactions:(data.events||[]).map(e=>({...e,fromLocation:[e.fromZone,e.fromBlock,e.fromRow].filter(Boolean).join(' / '),toLocation:[e.toZone,e.toBlock,e.toRow].filter(Boolean).join(' / ')}))}); }
     catch (err) { setError(errorText(err)); }
   }
   async function createUser(event) {
@@ -114,11 +129,27 @@ function App() {
       } catch { /* Manual entry may be recorded without a browser location. */ }
     }
     try {
-      const {data} = await api.post('/admin/containers', { ...manualEntry, locationId: manualEntry.locationId || null, ...geo });
-      setCreatedEntry(data); setManualEntry({ originalBarcode: '', containerNumber:'',sizeCode:'40ft',typeCode:'general',isoCode:'',shippingLine:'',sealNumber:'',conditionCode:'good',locationId: '' });
-      setNotice('Gate entry saved. The tracking barcode is ready to attach.');
+      const {data} = await api.post('/admin/containers', { ...manualEntry, yardId:Number(manualEntry.yardId),gateId:Number(manualEntry.gateId)||undefined,assignedTo:Number(manualEntry.assignedTo), ...geo });
+      setCreatedEntry(data);
+      setManualEntry(x=>({...x,originalBarcode:'',containerNumber:'',sealNumber:''}));setEntryOcrLocked(false);
+      if(entryPhoto){setPhotoUploadTarget(data.containerId);try{await uploadGatePhoto(data.containerId,entryPhoto);setPhotoUploadTarget(null);setEntryPhoto(null);setEntryPhotoPreview('');setNotice('Gate Entry and container photo saved. Put-away is assigned.');}catch{setError('Gate Entry was saved, but its photo did not upload. Tap Retry photo upload.');}}
+      else setNotice('Gate Entry saved. Put-away is assigned to the selected Yard Operator.');
     } catch (err) { setError(errorText(err)); }
   }
+  async function readEntryPhoto(file){
+    if(!file)return;setEntryPhoto(file);setEntryPhotoPreview(URL.createObjectURL(file));setEntryPhotoBusy(true);setError('');
+    let worker;
+    try{worker=await createWorker('eng');const {data}=await worker.recognize(file);const number=containerNumberFromText(data.text);
+      if(number){setManualEntry(x=>({...x,originalBarcode:number,containerNumber:number}));setEntryOcrLocked(true);setNotice('Container number read: '+number+'. Check it or tap Edit.');}
+      else setError('Could not read a container number. Retake the photo or enter the number manually.');
+    }catch{setError('Photo reading failed. Enter the container number manually.');}
+    finally{await worker?.terminate();setEntryPhotoBusy(false);}
+  }
+  async function uploadGatePhoto(containerId,file){
+    const form=new FormData();form.append('photo',file);
+    return api.post('/containers/'+containerId+'/photos',form,{headers:{'Content-Type':'multipart/form-data'}});
+  }
+  async function retryGatePhotoUpload(){if(!photoUploadTarget||!entryPhoto)return;try{await uploadGatePhoto(photoUploadTarget,entryPhoto);setPhotoUploadTarget(null);setEntryPhoto(null);setEntryPhotoPreview('');setError('');setNotice('Container photo uploaded to Gate Entry.');}catch(err){setError(errorText(err));}}
   async function submitLocation(event) {
     event.preventDefault(); setError(''); setNotice('');
     try {
@@ -142,7 +173,7 @@ function App() {
       <div className="nav-label">WORKSPACE</div>
       <button className={`nav-item ${view==='records'?'selected':''}`} onClick={()=>{setView('records');setPage(1);}}><Box size={18}/> Container records</button>
       <button className={`nav-item ${view==='history'?'selected':''}`} onClick={()=>{setView('history');setPage(1);}}><History size={18}/> Activity history</button>
-      {user.role === 'admin' && <button className={`nav-item ${view==='manual'?'selected':''}`} onClick={()=>{setView('manual');setCreatedEntry(null);}}><ClipboardPlus size={18}/> Manual gate entry</button>}
+      {user.role === 'admin' && <button className={`nav-item ${view==='manual'?'selected':''}`} onClick={()=>{setView('manual');setCreatedEntry(null);}}><ClipboardPlus size={18}/> Gate Entry</button>}
       {user.role === 'admin' && <button className={`nav-item ${view==='locations'?'selected':''}`} onClick={()=>setView('locations')}><MapPinned size={18}/> Location master</button>}
       {user.role === 'admin' && <button className={`nav-item ${view==='operations'&&opsTab==='yards'?'selected':''}`} onClick={()=>{setView('operations');setOpsTab('yards');}}>🏗️ Yards & gates</button>}
       {user.role === 'admin' && <button className={`nav-item ${view==='operations'&&opsTab==='shipments'?'selected':''}`} onClick={()=>{setView('operations');setOpsTab('shipments');}}><Truck size={18}/> Shipments</button>}
@@ -152,7 +183,7 @@ function App() {
       <div className="side-bottom"><div className="signed-user"><CircleUserRound size={20}/><div><b>{user.name}</b><span>{roleLabels[user.role]}</span></div></div><button className="signout" onClick={signOut}><LogOut size={17}/> Sign out</button></div>
     </aside>
     <main className="main">
-      <header className="topbar"><div><span className="eyebrow">YARD MANAGEMENT</span><h1>{{records:'Container records',history:'Activity history',manual:'Manual gate entry',locations:'Location master',users:'User access',operations:{yards:'Yards & gates',shipments:'Shipment management',reports:'Reports & exports',audit:'Security audit log'}}[view]?.[opsTab]||({records:'Container records',history:'Activity history',manual:'Manual gate entry',locations:'Location master',users:'User access'}[view])}</h1></div><div className="top-meta"><span className="online-dot"/> API connected <button className="icon-button" title="Refresh" onClick={view==='records'||view==='history'?loadData:view==='locations'||view==='manual'?()=>api.get('/admin/locations').then(({data})=>setLocations(data)):()=>api.get('/admin/users').then(({data})=>setUsers(data))}><RefreshCw size={17}/></button></div></header>
+      <header className="topbar"><div><span className="eyebrow">YARD MANAGEMENT</span><h1>{{records:'Container records',history:'Activity history',manual:'Gate Entry',locations:'Location master',users:'User access',operations:{yards:'Yards & gates',shipments:'Shipment management',reports:'Reports & exports',audit:'Security audit log'}}[view]?.[opsTab]||({records:'Container records',history:'Activity history',manual:'Gate Entry',locations:'Location master',users:'User access'}[view])}</h1></div><div className="top-meta"><span className="online-dot"/> API connected <button className="icon-button" title="Refresh" onClick={view==='records'||view==='history'?loadData:view==='locations'||view==='manual'?()=>api.get('/admin/locations').then(({data})=>setLocations(data)):()=>api.get('/admin/users').then(({data})=>setUsers(data))}><RefreshCw size={17}/></button></div></header>
       {error && <div className="error-box page-error">{error}<button onClick={()=>setError('')}><X size={16}/></button></div>}
       {notice && <div className="notice-box">{notice}<button onClick={()=>setNotice('')}><X size={16}/></button></div>}
       {view==='records' ? <>
@@ -184,17 +215,23 @@ function App() {
           {!busy&&!historyRows.length&&<tr><td className="empty" colSpan="5">No activity matches this search.</td></tr>}
         </tbody></table></div><Pagination page={page} pageCount={pageCount} total={total} onPage={setPage}/>
       </section> : view==='manual' ? <section className="master-grid">
-        <form className="panel master-form" onSubmit={submitManualEntry}><div className="panel-heading"><div><h2>Register container at the gate</h2><p>Type the scanned barcode, then select the container's yard slot.</p></div><div className="panel-icon green"><ClipboardPlus size={20}/></div></div>
-          <label>Original container barcode<input required autoFocus value={manualEntry.originalBarcode} onChange={e=>setManualEntry({...manualEntry,originalBarcode:e.target.value})} placeholder="Enter barcode from container"/></label>
-          <label>Container number<input value={manualEntry.containerNumber} onChange={e=>setManualEntry({...manualEntry,containerNumber:e.target.value})} placeholder="Same as scanned barcode if blank"/></label>
+        <form className="panel master-form" onSubmit={submitManualEntry}><div className="panel-heading"><div><h2>Gate Entry</h2><p>Scan, photograph, or enter the container number. Assign the Yard Operator who will put it away.</p></div><div className="panel-icon green"><ClipboardPlus size={20}/></div></div>
+          <label>Yard<select required value={manualEntry.yardId||yards[0]?.id||''} onChange={e=>setManualEntry({...manualEntry,yardId:e.target.value,gateId:'',assignedTo:''})}><option value="">Choose yard</option>{yards.filter(y=>y.isActive).map(y=><option key={y.id} value={y.id}>{y.yardName}</option>)}</select></label>
+          <label>Entry gate<select required value={manualEntry.gateId} onChange={e=>setManualEntry({...manualEntry,gateId:e.target.value})}><option value="">Choose entry gate</option>{gates.filter(g=>Number(g.yardId)===Number(manualEntry.yardId||yards[0]?.id)&&['in','both'].includes(g.direction)).map(g=><option key={g.id} value={g.id}>{g.gateName}</option>)}</select></label>
+          <label>Container number<input required autoFocus value={manualEntry.originalBarcode} onChange={e=>setManualEntry({...manualEntry,originalBarcode:e.target.value.toUpperCase(),containerNumber:e.target.value.toUpperCase()})} placeholder="Scan barcode or enter container number" readOnly={entryOcrLocked}/></label>
+          {entryOcrLocked&&<button type="button" className="link-button edit-ocr" onClick={()=>setEntryOcrLocked(false)}><Pencil size={14}/> Edit read number</button>}
+          <label className="photo-picker">📷 Capture / upload container photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={e=>readEntryPhoto(e.target.files?.[0])}/></label>
+          {entryPhotoBusy&&<div className="helper-note">Reading the container number from this photo…</div>}
+          {entryPhotoPreview&&<div className="entry-photo-preview"><img src={entryPhotoPreview} alt="Container entry photo"/><span>{photoUploadTarget?'Photo upload pending':'Photo will be saved with this Gate Entry'}</span>{photoUploadTarget?<button type="button" onClick={retryGatePhotoUpload}>Retry upload</button>:<button type="button" onClick={()=>{setEntryPhoto(null);setEntryPhotoPreview('');}}>Remove</button>}</div>}
+          <label>Put-away assigned to · Yard Operator<select required value={manualEntry.assignedTo} onChange={e=>setManualEntry({...manualEntry,assignedTo:e.target.value})}><option value="">Choose Yard Operator</option>{yardOperators.map(x=><option key={x.id} value={x.id}>{x.displayName}</option>)}</select></label>
+          {!yardOperators.length&&<div className="helper-note">No active Yard Operators are assigned to this yard. Create or assign a Yard Operator in User access before saving Gate Entry.</div>}
           <div className="form-pair"><label>Size<select value={manualEntry.sizeCode} onChange={e=>setManualEntry({...manualEntry,sizeCode:e.target.value})}><option>20ft</option><option>40ft</option><option>45ft</option></select></label><label>Type<select value={manualEntry.typeCode} onChange={e=>setManualEntry({...manualEntry,typeCode:e.target.value})}>{['general','reefer','open_top','flat_rack','tank'].map(x=><option key={x}>{x}</option>)}</select></label></div>
           <div className="form-pair"><label>ISO code<input value={manualEntry.isoCode} onChange={e=>setManualEntry({...manualEntry,isoCode:e.target.value})} placeholder="Optional"/></label><label>Condition<select value={manualEntry.conditionCode} onChange={e=>setManualEntry({...manualEntry,conditionCode:e.target.value})}><option value="good">Good</option><option value="damaged">Damaged</option><option value="inspection_required">Needs inspection</option><option value="unknown">Unknown</option></select></label></div>
           <div className="form-pair"><label>Shipping line<input value={manualEntry.shippingLine} onChange={e=>setManualEntry({...manualEntry,shippingLine:e.target.value})}/></label><label>Seal number<input value={manualEntry.sealNumber} onChange={e=>setManualEntry({...manualEntry,sealNumber:e.target.value})}/></label></div>
-          <label>Yard location<select value={manualEntry.locationId} onChange={e=>setManualEntry({...manualEntry,locationId:e.target.value})}><option value="">Gate entry only — assign later</option>{locations.filter(l=>l.isActive).map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></label>
-          <div className="helper-note"><MapPin size={16}/> Browser location is captured automatically when permission is available.</div>
-          <button className="primary full"><Plus size={18}/> Create gate entry</button>
+          <div className="helper-note"><MapPin size={16}/> Browser GPS is captured when permission is available. The assigned Yard Operator chooses an available slot in the mobile app.</div>
+          <button className="primary full" disabled={entryPhotoBusy||!yardOperators.length}><Plus size={18}/> Save Gate Entry & Assign Put-away</button>
           {createdEntry&&<div className="created-code"><div className="check-mark">✓</div><div className="created-code-content"><span>ENTRY SAVED · CODE 128 TRACKING</span><b>{createdEntry.trackingBarcode}</b><BarcodeLabel value={createdEntry.trackingBarcode}/><small>Print or attach this code to the container. The event is in the audit history.</small></div></div>}
-        </form><div className="panel help-panel"><div className="panel-heading"><div><h2>What happens next</h2><p>Each manual gate entry is auditable.</p></div></div><ol className="steps"><li><b>Container is registered</b><span>A unique internal Code 128 tracking value is generated.</span></li><li><b>Location is saved</b><span>If a slot is selected, Gate In and Put Away are both added to history.</span></li><li><b>Worker can scan it</b><span>Mobile users can view the container and complete future moves.</span></li></ol></div>
+        </form><div className="panel help-panel"><div className="panel-heading"><div><h2>Gate Entry → Yard Put-away</h2><p>Two role-separated steps for every new container.</p></div></div><ol className="steps"><li><b>Gate Operator or admin records entry</b><span>Container number, GPS and optional photo are saved. A unique Code 128 tracking barcode is created.</span></li><li><b>Yard Operator receives the task</b><span>The selected operator sees the assigned task in the mobile Put-away screen.</span></li><li><b>Operator stores the container</b><span>Only available, compatible slots are offered. The app records the put-away event and location.</span></li></ol></div>
       </section> : view==='locations' ? <section className="master-grid">
         <form className="panel master-form" onSubmit={submitLocation}><div className="panel-heading"><div><h2>Add yard position</h2><p>Build the exact slot from zone, block, row, and position.</p></div><div className="panel-icon blue"><MapPinned size={20}/></div></div>
           <label>Yard<select value={newLocation.yardId||yards[0]?.id||''} onChange={e=>setNewLocation({...newLocation,yardId:e.target.value})}>{yards.map(y=><option key={y.id} value={y.id}>{y.yardName}</option>)}</select></label>
@@ -237,16 +274,19 @@ function BarcodeLabel({value}) { const ref=useRef(null); useEffect(()=>{if(ref.c
 
 function Detail({record,onClose,editable,onSaved}) {
   const [editing,setEditing]=useState(false);const [draft,setDraft]=useState({});const [saving,setSaving]=useState(false);const [barcodeOpen,setBarcodeOpen]=useState(false);
+  const [photoUrls,setPhotoUrls]=useState([]);
   useEffect(()=>setDraft({containerNumber:record.containerNumber||'',sizeCode:record.sizeCode||'',typeCode:record.typeCode||'',isoCode:record.isoCode||'',shippingLine:record.shippingLine||'',sealNumber:record.sealNumber||'',conditionCode:record.conditionCode||'unknown',remarks:record.remarks||''}),[record]);
+  useEffect(()=>{let active=true;const urls=[];(async()=>{for(const photo of record.photos||[]){try{const response=await api.get('/container-photos/'+photo.id,{responseType:'blob'});const url=URL.createObjectURL(response.data);urls.push(url);}catch{}}if(active)setPhotoUrls(urls);else urls.forEach(URL.revokeObjectURL);})();return()=>{active=false;urls.forEach(URL.revokeObjectURL);};},[record.id,record.photos]);
   async function saveDetails(e){e.preventDefault();setSaving(true);try{await api.patch(`/admin/containers/${record.id}`,draft);setEditing(false);await onSaved({id:record.id});}catch(err){alert(errorText(err));}finally{setSaving(false);}}
   useEffect(()=>{const onKey=e=>e.key==='Escape'&&onClose();window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[onClose]);
   return <div className="overlay" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><aside className="drawer">
     <div className="drawer-head"><div><span className="eyebrow">CONTAINER #{record.id}</span><h2>Record details</h2></div><button className="icon-button" onClick={onClose}><X size={20}/></button></div>
     <div className="detail-card"><div className="detail-title"><span className="mini-icon"><Container size={18}/></span><div><b>{record.originalBarcode}</b><span>Original barcode</span></div></div>
-      <div className="detail-grid"><div><span>Tracking barcode</span><button className="tracking-barcode-link" onClick={()=>setBarcodeOpen(true)} title="Show tracking barcode"><b className="code-cell">{record.trackingBarcode}</b><small>Click to view / print</small></button></div><div><span>Status</span><Status status={record.status}/></div><div><span>Current location</span><b>{record.locationName || 'Not assigned'}</b></div><div><span>Gate-in date</span><b>{dateText(record.createdAt)}</b></div></div>
+      <div className="detail-grid"><div><span>Tracking barcode</span><button className="tracking-barcode-link" onClick={()=>setBarcodeOpen(true)} title="Show tracking barcode"><b className="code-cell">{record.trackingBarcode}</b><small>Click to view / print</small></button></div><div><span>Status</span><Status status={record.status}/></div><div><span>Current location</span><b>{record.locationName || 'Not assigned'}</b></div><div><span>Gate-in date</span><b>{dateText(record.createdAt)}</b></div><div><span>Put-away operator</span><b>{record.putawayAssignedToName || (record.status==='awaiting_putaway'?'Unassigned':'—')}</b></div></div>
     </div>
     {editable&&<div className="panel"><div className="panel-heading"><div><h2>Container master</h2><p>Edit identification and condition details.</p></div><button className="link-button" onClick={()=>setEditing(v=>!v)}>{editing?'Cancel':'Edit'}</button></div>{editing?<form onSubmit={saveDetails} className="master-form">{[['containerNumber','Container number'],['sizeCode','Size code'],['typeCode','Container type'],['isoCode','ISO code'],['shippingLine','Shipping line'],['sealNumber','Seal number'],['remarks','Remarks']].map(([key,label])=><label key={key}>{label}<input value={draft[key]||''} onChange={e=>setDraft({...draft,[key]:e.target.value})}/></label>)}<label>Condition<select value={draft.conditionCode} onChange={e=>setDraft({...draft,conditionCode:e.target.value})}><option value="good">Good</option><option value="damaged">Damaged</option><option value="inspection_required">Needs inspection</option><option value="unknown">Unknown</option></select></label><button className="primary full" disabled={saving}>{saving?'Saving…':'Save details'}</button></form>:<div className="detail-grid"><div><span>Size / type</span><b>{record.sizeCode||'—'} / {record.typeCode||'—'}</b></div><div><span>ISO code</span><b>{record.isoCode||'—'}</b></div><div><span>Shipping line</span><b>{record.shippingLine||'—'}</b></div><div><span>Seal / condition</span><b>{record.sealNumber||'—'} / {record.conditionCode||'unknown'}</b></div></div>}</div>}
     {barcodeOpen&&<div className="barcode-overlay" onMouseDown={e=>e.target===e.currentTarget&&setBarcodeOpen(false)}><section className="barcode-dialog"><div className="barcode-dialog-head"><div><h2>TRACKING BARCODE</h2><p>Code 128 · Container {record.originalBarcode}</p></div><button className="icon-button" onClick={()=>setBarcodeOpen(false)} aria-label="Close"><X size={18}/></button></div><div className="barcode-print-area"><BarcodeLabel value={record.trackingBarcode}/><b>{record.trackingBarcode}</b></div><button className="primary barcode-print-button" onClick={()=>window.print()}><Printer size={17}/> Print barcode</button></section></div>}
+    {!!photoUrls.length&&<section className="detail-photos"><div><b>Gate entry photos</b><span>{photoUrls.length} saved</span></div><div className="detail-photo-grid">{photoUrls.map((src,index)=><img key={src} src={src} alt={'Container gate entry '+(index+1)}/>)}</div></section>}
     <div className="timeline-title"><div><h3>Activity history</h3><p>{record.transactions.length} recorded actions</p></div><Clock3 size={19}/></div>
     <div className="timeline">{record.transactions.map((tx,i)=><div className="event" key={tx.id}><div className={`event-dot ${i===0?'latest':''}`}/><div className="event-content"><div className="event-top"><b>{tx.actionType}</b><span>{dateText(tx.timestamp)}</span></div>
       <div className="event-route">{tx.fromLocation && <span><ArrowUpRight size={14}/>{tx.fromLocation}</span>}{tx.toLocation && <span><ArrowDownRight size={14}/>{tx.toLocation}</span>}{!tx.fromLocation&&!tx.toLocation&&<span><MapPin size={14}/>Gate</span>}</div>
