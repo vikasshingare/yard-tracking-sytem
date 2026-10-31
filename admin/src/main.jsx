@@ -55,7 +55,7 @@ function App() {
   const [overview, setOverview] = useState({ total: 0, inYard: 0, shipped: 0, todayEvents: 0 });
   const [page, setPage] = useState(1); const [total, setTotal] = useState(0);
   const [search, setSearch] = useState(''); const [status, setStatus] = useState('');
-  const [actionType, setActionType] = useState('');
+  const [actionType, setActionType] = useState(''); const [sort,setSort]=useState('date'); const [direction,setDirection]=useState('desc');
   const [selected, setSelected] = useState(null); const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
   const [putawayTasks,setPutawayTasks]=useState([]); const [putawayLocations,setPutawayLocations]=useState([]);
@@ -70,7 +70,7 @@ function App() {
   const [yardOperators,setYardOperators]=useState([]);
   const [newLocation, setNewLocation] = useState({ zoneName: '', blockName: '', rowName: '', bayName:'01', tierName:'01', positionName: '', capacity:'1', status:'available', compatibleTypes:'' });
   const [yards, setYards] = useState([]);
-  const pageCount = Math.max(1, Math.ceil(total / 25));
+  const pageCount = Math.max(1, Math.ceil(total / 25)); function toggleSort(key){if(sort===key)setDirection(x=>x==='desc'?'asc':'desc');else{setSort(key);setDirection(key==='date'?'desc':'asc');}setPage(1);}
   const selectedPutawayTask=putawayTasks.find(task=>[task.trackingBarcode,task.containerNumber,task.originalBarcode].some(code=>String(code||'').toUpperCase()===putawayBarcode.trim().toUpperCase()));
   const putawayDestinationOptions=putawayLocations.filter(slot=>slot.availability==='available'&&selectedPutawayTask&&Number(slot.yardId)===Number(selectedPutawayTask.yardId)&&compatibleSlot(slot,selectedPutawayTask.typeCode));
 
@@ -90,18 +90,18 @@ function App() {
     setBusy(true); setError('');
     try {
       if (view === 'history') {
-        const { data } = await api.get('/admin/history', { params: { page, limit: 25, search, actionType } });
+        const { data } = await api.get('/admin/history', { params: { page, limit: 25, search, actionType, sort, direction } });
         setHistoryRows(data.rows); setTotal(data.total);
       } else if (view === 'records') {
         const [{data: summary}, {data: list}] = await Promise.all([
-          api.get('/admin/overview'), api.get('/admin/containers', { params: { page, limit: 25, search, status } }),
+          api.get('/admin/overview'), api.get('/admin/containers', { params: { page, limit: 25, search, status, sort, direction } }),
         ]);
         setOverview(summary); setRecords(list.rows); setTotal(list.total);
       }
     } catch (err) { setError(errorText(err)); }
     finally { setBusy(false); }
   }
-  useEffect(() => { loadData(); }, [user, view, page, search, status, actionType]);
+  useEffect(() => { loadData(); }, [user, view, page, search, status, actionType, sort, direction]);
   useEffect(() => { if (user && view === 'users' && user.role === 'admin') api.get('/admin/users').then(({data})=>setUsers(data)).catch(e=>setError(errorText(e))); }, [user, view]);
   useEffect(() => { if (user && ['manual', 'locations'].includes(view)) api.get('/admin/locations',{params:view==='manual'&&manualEntry.yardId?{yardId:manualEntry.yardId}:{}}).then(({data})=>setLocations(data)).catch(e=>setError(errorText(e))); }, [user, view, manualEntry.yardId]);
   async function loadPutaway(){try{const [{data:tasks},{data:slots}]=await Promise.all([api.get('/put-away/tasks'),api.get('/locations')]);setPutawayTasks(tasks);setPutawayLocations(slots);}catch(e){setError(errorText(e));}}
@@ -207,7 +207,7 @@ function App() {
           <div className="filters"><div className="searchbox"><Search size={18}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search barcode…" /></div>
             <select value={status} onChange={e=>{setStatus(e.target.value);setPage(1);}}><option value="">All active statuses</option><option value="awaiting_putaway">Awaiting put-away</option><option value="in-yard">In yard</option><option value="reserved_for_shipment">Reserved</option><option value="ready_for_gate_out">Ready for gate-out</option><option value="dispatched">Dispatched</option></select>
           </div>
-          <div className="table-wrap"><table><thead><tr><th>CONTAINER</th><th>TRACKING BARCODE</th><th>LOCATION</th><th>STATUS</th><th>GATE IN</th><th></th></tr></thead><tbody>
+          <div className="table-wrap"><table><thead><tr><th onClick={()=>toggleSort(`container`)}>CONTAINER ↕</th><th onClick={()=>toggleSort(`barcode`)}>TRACKING BARCODE ↕</th><th onClick={()=>toggleSort(`location`)}>LOCATION ↕</th><th onClick={()=>toggleSort(`status`)}>STATUS ↕</th><th onClick={()=>toggleSort(`date`)}>GATE IN ↕</th><th></th></tr></thead><tbody>
             {busy && !records.length ? <tr><td className="empty" colSpan="6">Loading records…</td></tr> : records.map(r=><tr key={r.id} onClick={()=>showRecord(r)} className="click-row">
               <td><div className="cell-main"><span className="mini-icon"><Container size={16}/></span><b>{r.originalBarcode}</b></div></td><td className="code-cell">{r.trackingBarcode}</td><td>{r.locationName || <span className="muted">—</span>}</td><td><Status status={r.status}/></td><td>{dateText(r.createdAt)}</td><td><ChevronRight size={17} className="row-arrow"/></td>
             </tr>)}
@@ -219,7 +219,7 @@ function App() {
         <div className="panel-heading"><div><h2>Yard activity</h2><p>Every gate entry, put-away, move, and exit in time order.</p></div><span className="record-count">{total.toLocaleString()} events</span></div>
         <div className="filters"><div className="searchbox"><Search size={18}/><input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search container or tracking code…" /></div>
           <select value={actionType} onChange={e=>{setActionType(e.target.value);setPage(1);}}><option value="">All actions</option>{['Gate In','Put Away','Move','Gate Out'].map(a=><option key={a}>{a}</option>)}</select>
-        </div><div className="table-wrap"><table><thead><tr><th>WHEN</th><th>ACTION</th><th>CONTAINER</th><th>LOCATION CHANGE</th><th>USER</th></tr></thead><tbody>
+        </div><div className="table-wrap"><table><thead><tr><th onClick={()=>toggleSort(`date`)}>WHEN ↕</th><th onClick={()=>toggleSort(`action`)}>ACTION ↕</th><th onClick={()=>toggleSort(`container`)}>CONTAINER ↕</th><th>LOCATION CHANGE</th><th onClick={()=>toggleSort(`user`)}>USER ↕</th></tr></thead><tbody>
           {busy&&!historyRows.length?<tr><td className="empty" colSpan="5">Loading activity…</td></tr>:historyRows.map(row=><tr key={row.id} className="click-row" onClick={()=>showRecord({id:row.containerId})}><td>{dateText(row.timestamp)}</td><td><span className={`action-pill ${row.actionType.toLowerCase().replace(' ','-')}`}>{row.actionType}</span></td><td><b>{row.originalBarcode}</b><div className="code-cell">{row.trackingBarcode}</div></td><td>{row.fromLocation||'Gate'} <span className="route-arrow">→</span> {row.toLocation||'Gate'}</td><td>{row.userName||'—'}<div className="muted">{roleLabels[row.userRole]||''}</div></td></tr>)}
           {!busy&&!historyRows.length&&<tr><td className="empty" colSpan="5">No activity matches this search.</td></tr>}
         </tbody></table></div><Pagination page={page} pageCount={pageCount} total={total} onPage={setPage}/>
