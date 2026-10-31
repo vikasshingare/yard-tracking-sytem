@@ -7,7 +7,8 @@ import useLocationCapture from '../components/LocationCapture';
 import api, { errorMessage } from '../api';
 import { queueAction } from '../offlineQueue';
 
-export default function PutAwayMoveScreen() {
+export default function PutAwayMoveScreen({role}) {
+  const isSuperAdmin=role==='admin';
   const [mode, setMode] = useState('put-away');
   const [trackingBarcode, setTrackingBarcode] = useState('');
   const [ocrLocked,setOcrLocked]=useState(false);
@@ -64,12 +65,12 @@ export default function PutAwayMoveScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <Text style={styles.title}>📦  STORE / MOVE</Text>
+      <Text style={styles.title}>📦  PUT-AWAY / MOVE</Text>
       <View style={styles.tabs}>
         <Pressable onPress={() => setMode('put-away')} style={[styles.tab, mode === 'put-away' && styles.putTab]}><Text style={styles.tabText}>⬇ PUT AWAY</Text></Pressable>
         <Pressable onPress={() => setMode('move')} style={[styles.tab, mode === 'move' && styles.moveTab]}><Text style={styles.tabText}>➡ MOVE</Text></Pressable>
       </View>
-      {mode==='put-away'&&<View style={styles.taskCard}><Text style={styles.taskTitle}>ASSIGNED PUT-AWAY TASKS</Text><Text style={styles.taskHint}>Select a container or scan its label.</Text>{tasks.map(task=><Pressable key={task.id} style={styles.taskRow} onPress={()=>acceptContainerScan(task.trackingBarcode)}><View style={styles.taskIcon}><Text style={styles.taskIconText}>📦</Text></View><View style={styles.taskCopy}><Text style={styles.taskNumber}>{task.containerNumber||task.originalBarcode}</Text><Text style={styles.taskBarcode}>{task.trackingBarcode}</Text></View><Text style={styles.taskArrow}>›</Text></Pressable>)}{!tasks.length&&<Text style={styles.noTasks}>No assigned containers waiting.</Text>}</View>}
+      {mode==='put-away'&&<View style={styles.taskCard}><Text style={styles.taskTitle}>{isSuperAdmin?'PENDING PUT-AWAY TASKS':'ASSIGNED PUT-AWAY TASKS'}</Text><Text style={styles.taskHint}>{isSuperAdmin?'Select any pending container to complete its put-away.':'Select an assigned container or scan its label.'}</Text>{tasks.map(task=><Pressable key={task.id} style={styles.taskRow} onPress={()=>acceptContainerScan(task.trackingBarcode)}><View style={styles.taskIcon}><Text style={styles.taskIconText}>📦</Text></View><View style={styles.taskCopy}><Text style={styles.taskNumber}>{task.containerNumber||task.originalBarcode}</Text><Text style={styles.taskBarcode}>{task.trackingBarcode}{isSuperAdmin&&task.assignedToName?` · ${task.assignedToName}`:''}</Text></View><Text style={styles.taskArrow}>›</Text></Pressable>)}{!tasks.length&&<Text style={styles.noTasks}>No containers waiting for put-away.</Text>}</View>}
       <Text style={styles.step}>1. Scan, photograph, or enter container code</Text>
       <BarcodeScanner label="SCAN TRACKING CODE" barcodeTypes={['code128']} allowPhotoCapture onScan={(value)=>acceptContainerScan(value,false)} onTextRecognized={(value)=>acceptContainerScan(value,true)} />
       <View style={styles.entryInputRow}><TextInput style={styles.containerInput} placeholder="Tracking barcode or container number" value={trackingBarcode} onChangeText={v=>{setTrackingBarcode(v.toUpperCase());setOcrLocked(false);setContainerYardId(null);}} onEndEditing={(e)=>{if(e.nativeEvent.text.trim())acceptContainerScan(e.nativeEvent.text.trim(),ocrLocked);}} editable={!ocrLocked} autoCapitalize="characters" autoCorrect={false}/>{ocrLocked&&<Pressable style={styles.editButton} onPress={()=>setOcrLocked(false)}><Pencil size={17} color="white"/><Text style={styles.editText}>EDIT</Text></Pressable>}</View>

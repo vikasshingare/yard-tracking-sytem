@@ -221,9 +221,9 @@ module.exports = function createBrdRouter(pool) {
       const params=[...scope.params,...(req.user.role==='yard_operator'?[req.user.id]:[])];
       const [rows]=await pool.execute(
         `SELECT c.id,c.container_number AS containerNumber,c.original_barcode AS originalBarcode,
-          c.internal_tracking_barcode AS trackingBarcode,c.yard_id AS yardId,c.putaway_assigned_to AS assignedTo,
+          c.internal_tracking_barcode AS trackingBarcode,c.type_code AS typeCode,c.yard_id AS yardId,y.yard_name AS yardName,c.putaway_assigned_to AS assignedTo,
           u.display_name AS assignedToName,c.created_at AS createdAt
-         FROM Containers c LEFT JOIN Users u ON u.id=c.putaway_assigned_to
+         FROM Containers c JOIN Yards y ON y.id=c.yard_id LEFT JOIN Users u ON u.id=c.putaway_assigned_to
          WHERE c.status='awaiting_putaway'${scope.sql}${assignedClause}
          ORDER BY (c.putaway_assigned_to IS NULL),c.created_at LIMIT 100`,params);
       res.json(rows);

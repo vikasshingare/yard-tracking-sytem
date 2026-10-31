@@ -13,9 +13,10 @@ api.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
-const roleLabels = { yard_operator: 'Yard operator', gate_operator: 'Gate operator', shipment_operator: 'Shipment operator', supervisor: 'Supervisor', viewer: 'Viewer', admin: 'Administrator' };
+const roleLabels = { yard_operator: 'Yard operator', gate_operator: 'Gate operator', shipment_operator: 'Shipment operator', supervisor: 'Supervisor', viewer: 'Viewer', admin: 'Super Admin' };
 const errorText = (error) => error?.response?.data?.error || 'Could not connect to the yard server.';
 const dateText = (value) => value ? new Date(value).toLocaleString() : '—';
+function compatibleSlot(slot,typeCode){let types=slot.compatibleTypes;if(typeof types==='string'){try{types=JSON.parse(types);}catch{types=types.split(',').map(x=>x.trim());}}if(!Array.isArray(types)||!types.length)return true;const accepted=types.map(x=>String(x).toUpperCase());return accepted.includes('ALL')||accepted.includes(String(typeCode||'').toUpperCase());}
 function containerNumberFromText(text) {
   const compact=String(text||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
   const fixes={O:'0',Q:'0',D:'0',I:'1',L:'1',Z:'2',S:'5',G:'6',B:'8'};
@@ -57,6 +58,8 @@ function App() {
   const [actionType, setActionType] = useState('');
   const [selected, setSelected] = useState(null); const [users, setUsers] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [putawayTasks,setPutawayTasks]=useState([]); const [putawayLocations,setPutawayLocations]=useState([]);
+  const [putawayBarcode,setPutawayBarcode]=useState(''); const [putawayLocationId,setPutawayLocationId]=useState('');
   const [gates,setGates]=useState([]);
   const [notice, setNotice] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const [newUser, setNewUser] = useState({ displayName: '', email: '', password: '', role: 'yard_operator', yardIds: [],gateIds:[] });
@@ -68,6 +71,8 @@ function App() {
   const [newLocation, setNewLocation] = useState({ zoneName: '', blockName: '', rowName: '', bayName:'01', tierName:'01', positionName: '', capacity:'1', status:'available', compatibleTypes:'' });
   const [yards, setYards] = useState([]);
   const pageCount = Math.max(1, Math.ceil(total / 25));
+  const selectedPutawayTask=putawayTasks.find(task=>[task.trackingBarcode,task.containerNumber,task.originalBarcode].some(code=>String(code||'').toUpperCase()===putawayBarcode.trim().toUpperCase()));
+  const putawayDestinationOptions=putawayLocations.filter(slot=>slot.availability==='available'&&selectedPutawayTask&&Number(slot.yardId)===Number(selectedPutawayTask.yardId)&&compatibleSlot(slot,selectedPutawayTask.typeCode));
 
   useEffect(() => {
     const token = localStorage.getItem('yard_admin_token');
@@ -99,6 +104,8 @@ function App() {
   useEffect(() => { loadData(); }, [user, view, page, search, status, actionType]);
   useEffect(() => { if (user && view === 'users' && user.role === 'admin') api.get('/admin/users').then(({data})=>setUsers(data)).catch(e=>setError(errorText(e))); }, [user, view]);
   useEffect(() => { if (user && ['manual', 'locations'].includes(view)) api.get('/admin/locations',{params:view==='manual'&&manualEntry.yardId?{yardId:manualEntry.yardId}:{}}).then(({data})=>setLocations(data)).catch(e=>setError(errorText(e))); }, [user, view, manualEntry.yardId]);
+  async function loadPutaway(){try{const [{data:tasks},{data:slots}]=await Promise.all([api.get('/put-away/tasks'),api.get('/locations')]);setPutawayTasks(tasks);setPutawayLocations(slots);}catch(e){setError(errorText(e));}}
+  useEffect(()=>{if(user?.role==='admin'&&view==='putaway')loadPutaway();},[user,view]);
   useEffect(() => { if(user&&view==='manual'&&manualEntry.yardId){api.get('/yard-operators',{params:{yardId:manualEntry.yardId}}).then(({data})=>{setYardOperators(data);setManualEntry(x=>({...x,assignedTo:data.some(y=>String(y.id)===String(x.assignedTo))?x.assignedTo:(data[0]?String(data[0].id):'')}));}).catch(e=>{setYardOperators([]);setError(errorText(e));});}},[user,view,manualEntry.yardId]);
 
   async function showRecord(record) {
@@ -136,6 +143,7 @@ function App() {
       else setNotice('Gate Entry saved. Put-away is assigned to the selected Yard Operator.');
     } catch (err) { setError(errorText(err)); }
   }
+  async function submitAdminPutaway(event){event.preventDefault();setError('');setNotice('');try{let geo={};if(navigator.geolocation){try{const p=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{timeout:5000}));geo={geoLat:p.coords.latitude,geoLong:p.coords.longitude};}catch{}}const {data}=await api.post('/put-away',{trackingBarcode:putawayBarcode.trim().toUpperCase(),locationId:Number(putawayLocationId),...geo});setNotice(data.message||'Put-away completed.');setPutawayBarcode('');setPutawayLocationId('');await loadPutaway();}catch(e){setError(errorText(e));}}
   async function readEntryPhoto(file){
     if(!file)return;setEntryPhoto(file);setEntryPhotoPreview(URL.createObjectURL(file));setEntryPhotoBusy(true);setError('');
     let worker;
@@ -173,6 +181,7 @@ function App() {
       <div className="nav-label">WORKSPACE</div>
       <button className={`nav-item ${view==='records'?'selected':''}`} onClick={()=>{setView('records');setPage(1);}}><Box size={18}/> Container records</button>
       <button className={`nav-item ${view==='history'?'selected':''}`} onClick={()=>{setView('history');setPage(1);}}><History size={18}/> Activity history</button>
+      {user.role === 'admin' && <button className={`nav-item ${view==='putaway'?'selected':''}`} onClick={()=>setView('putaway')}><PackageCheck size={18}/> Put-away</button>}
       {user.role === 'admin' && <button className={`nav-item ${view==='manual'?'selected':''}`} onClick={()=>{setView('manual');setCreatedEntry(null);}}><ClipboardPlus size={18}/> Gate Entry</button>}
       {user.role === 'admin' && <button className={`nav-item ${view==='locations'?'selected':''}`} onClick={()=>setView('locations')}><MapPinned size={18}/> Location master</button>}
       {user.role === 'admin' && <button className={`nav-item ${view==='operations'&&opsTab==='yards'?'selected':''}`} onClick={()=>{setView('operations');setOpsTab('yards');}}>🏗️ Yards & gates</button>}
@@ -183,7 +192,7 @@ function App() {
       <div className="side-bottom"><div className="signed-user"><CircleUserRound size={20}/><div><b>{user.name}</b><span>{roleLabels[user.role]}</span></div></div><button className="signout" onClick={signOut}><LogOut size={17}/> Sign out</button></div>
     </aside>
     <main className="main">
-      <header className="topbar"><div><span className="eyebrow">YARD MANAGEMENT</span><h1>{{records:'Container records',history:'Activity history',manual:'Gate Entry',locations:'Location master',users:'User access',operations:{yards:'Yards & gates',shipments:'Shipment management',reports:'Reports & exports',audit:'Security audit log'}}[view]?.[opsTab]||({records:'Container records',history:'Activity history',manual:'Gate Entry',locations:'Location master',users:'User access'}[view])}</h1></div><div className="top-meta"><span className="online-dot"/> API connected <button className="icon-button" title="Refresh" onClick={view==='records'||view==='history'?loadData:view==='locations'||view==='manual'?()=>api.get('/admin/locations').then(({data})=>setLocations(data)):()=>api.get('/admin/users').then(({data})=>setUsers(data))}><RefreshCw size={17}/></button></div></header>
+      <header className="topbar"><div><span className="eyebrow">YARD MANAGEMENT</span><h1>{{records:'Container records',history:'Activity history',manual:'Gate Entry',putaway:'Put-away',locations:'Location master',users:'User access',operations:{yards:'Yards & gates',shipments:'Shipment management',reports:'Reports & exports',audit:'Security audit log'}}[view]?.[opsTab]||({records:'Container records',history:'Activity history',manual:'Gate Entry',putaway:'Put-away',locations:'Location master',users:'User access'}[view])}</h1></div><div className="top-meta"><span className="online-dot"/> API connected <button className="icon-button" title="Refresh" onClick={view==='records'||view==='history'?loadData:view==='putaway'?loadPutaway:view==='locations'||view==='manual'?()=>api.get('/admin/locations').then(({data})=>setLocations(data)):()=>api.get('/admin/users').then(({data})=>setUsers(data))}><RefreshCw size={17}/></button></div></header>
       {error && <div className="error-box page-error">{error}<button onClick={()=>setError('')}><X size={16}/></button></div>}
       {notice && <div className="notice-box">{notice}<button onClick={()=>setNotice('')}><X size={16}/></button></div>}
       {view==='records' ? <>
@@ -232,6 +241,16 @@ function App() {
           <button className="primary full" disabled={entryPhotoBusy||!yardOperators.length}><Plus size={18}/> Save Gate Entry & Assign Put-away</button>
           {createdEntry&&<div className="created-code"><div className="check-mark">✓</div><div className="created-code-content"><span>ENTRY SAVED · CODE 128 TRACKING</span><b>{createdEntry.trackingBarcode}</b><BarcodeLabel value={createdEntry.trackingBarcode}/><small>Print or attach this code to the container. The event is in the audit history.</small></div></div>}
         </form><div className="panel help-panel"><div className="panel-heading"><div><h2>Gate Entry → Yard Put-away</h2><p>Two role-separated steps for every new container.</p></div></div><ol className="steps"><li><b>Gate Operator or admin records entry</b><span>Container number, GPS and optional photo are saved. A unique Code 128 tracking barcode is created.</span></li><li><b>Yard Operator receives the task</b><span>The selected operator sees the assigned task in the mobile Put-away screen.</span></li><li><b>Operator stores the container</b><span>Only available, compatible slots are offered. The app records the put-away event and location.</span></li></ol></div>
+      </section> : view==='putaway' ? <section className="putaway-layout">
+        <div className="panel putaway-panel"><div className="panel-heading"><div><h2>Awaiting put-away</h2><p>Super Admin can complete a task or the assigned Yard Operator can use the mobile app.</p></div><span className="record-count">{putawayTasks.length} pending</span></div>
+          <div className="table-wrap"><table><thead><tr><th>CONTAINER</th><th>TRACKING BARCODE</th><th>YARD</th><th>ASSIGNED OPERATOR</th><th>ENTRY TIME</th><th></th></tr></thead><tbody>{putawayTasks.map(task=><tr key={task.id}><td><b>{task.containerNumber||task.originalBarcode}</b></td><td className="code-cell">{task.trackingBarcode}</td><td>{task.yardName||task.yardId}</td><td>{task.assignedToName||'Unassigned'}</td><td>{dateText(task.createdAt)}</td><td><button className="link-button" onClick={()=>{setPutawayBarcode(task.trackingBarcode);setPutawayLocationId('');}}>Select</button></td></tr>)}{!putawayTasks.length&&<tr><td colSpan="6" className="empty">No containers are waiting for put-away.</td></tr>}</tbody></table></div>
+        </div>
+        <form className="panel putaway-form" onSubmit={submitAdminPutaway}><div className="panel-heading"><div><h2>Complete put-away</h2><p>Scan or enter a tracking barcode, then choose an available slot.</p></div><div className="panel-icon blue"><PackageCheck size={20}/></div></div>
+          <label>Tracking barcode or container number<input required value={putawayBarcode} onChange={e=>setPutawayBarcode(e.target.value.toUpperCase())} placeholder="Scan or enter container code" autoCapitalize="characters"/></label>
+          <label>Available destination<select required value={putawayLocationId} onChange={e=>setPutawayLocationId(e.target.value)}><option value="">{selectedPutawayTask?'Choose an available slot in '+selectedPutawayTask.yardName:'Select a pending container first'}</option>{putawayDestinationOptions.map(slot=><option key={slot.id} value={slot.id}>{slot.label}</option>)}</select></label>
+          {selectedPutawayTask&&!putawayDestinationOptions.length&&<div className="helper-note">No compatible available slots in this container’s yard. Add or free a location in Location master.</div>}
+          <button className="primary full" disabled={!selectedPutawayTask||!putawayDestinationOptions.length}><PackageCheck size={17}/> Confirm put-away</button>
+        </form>
       </section> : view==='locations' ? <section className="master-grid">
         <form className="panel master-form" onSubmit={submitLocation}><div className="panel-heading"><div><h2>Add yard position</h2><p>Build the exact slot from zone, block, row, and position.</p></div><div className="panel-icon blue"><MapPinned size={20}/></div></div>
           <label>Yard<select value={newLocation.yardId||yards[0]?.id||''} onChange={e=>setNewLocation({...newLocation,yardId:e.target.value})}>{yards.map(y=><option key={y.id} value={y.id}>{y.yardName}</option>)}</select></label>

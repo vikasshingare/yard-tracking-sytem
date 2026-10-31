@@ -20,7 +20,7 @@ import TrackScreen from './src/screens/TrackScreen';
 import {listQueued,syncQueued} from './src/offlineQueue';
 
 const Drawer = createDrawerNavigator();
-const ROLE_LABELS = { yard_operator: 'Yard operator', gate_operator: 'Gate operator', shipment_operator: 'Shipment operator', supervisor: 'Supervisor', viewer: 'Viewer', admin: 'Administrator' };
+const ROLE_LABELS = { yard_operator: 'Yard operator', gate_operator: 'Gate operator', shipment_operator: 'Shipment operator', supervisor: 'Supervisor', viewer: 'Viewer', admin: 'Super Admin' };
 
 function YardDrawerContent({ user, onLogout, ...props }) {
   return <View style={styles.drawer}>
@@ -56,7 +56,7 @@ export default function App() {
       drawerLabelStyle:{fontSize:14,fontWeight:'800'},drawerItemStyle:{borderRadius:10,marginHorizontal:10},
     }}>
       {isGate&&<Drawer.Screen name="Entry" component={GateInScreen} options={{title:'🟢  GATE IN',drawerLabel:'🟢  Gate In'}}/>}
-      {isYard&&<Drawer.Screen name="StoreMove" component={PutAwayMoveScreen} options={{title:'🔵  STORE / MOVE',drawerLabel:'🔵  Store / Move'}}/>}
+      {isYard&&<Drawer.Screen name="StoreMove" options={{title:'🔵  PUT-AWAY / MOVE',drawerLabel:'🔵  Put-away / Move'}}>{props=><PutAwayMoveScreen {...props} role={user.role}/>}</Drawer.Screen>}
       {isGate&&<Drawer.Screen name="Exit" component={GateOutScreen} options={{title:'🔴  GATE OUT',drawerLabel:'🔴  Gate Out'}}/>}
       {['shipment_operator','supervisor','admin'].includes(user.role)&&<Drawer.Screen name="Shipments" component={require('./src/screens/ShipmentsScreen').default} options={{title:'🚛  SHIPMENTS',drawerLabel:'🚛  Shipments'}}/>}
       <Drawer.Screen name="SyncStatus" component={SyncStatusScreen} options={{title:`🔄  SYNC STATUS${pendingCount?` (${pendingCount})`:''}`,drawerLabel:`🔄  Sync status${pendingCount?` · ${pendingCount}`:''}`}}/>
