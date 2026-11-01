@@ -17,6 +17,7 @@ import ContainerDetailsScreen from './src/screens/ContainerDetailsScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import SyncStatusScreen from './src/screens/SyncStatusScreen';
 import TrackScreen from './src/screens/TrackScreen';
+import DashboardScreen from './src/screens/DashboardScreen';
 import {listQueued,syncQueued} from './src/offlineQueue';
 
 const Drawer = createDrawerNavigator();
@@ -47,7 +48,7 @@ export default function App() {
   const user = session.user;
   const isGate = ['gate_operator', 'supervisor', 'admin'].includes(user.role);
   const isYard = ['yard_operator', 'supervisor', 'admin'].includes(user.role);
-  const firstRoute = isGate ? 'Entry' : isYard ? 'StoreMove' : 'Inventory';
+  const firstRoute = 'Dashboard';
 
   return <GestureHandlerRootView style={{ flex: 1 }}><SafeAreaProvider><NavigationContainer key={user.id}>
     <Drawer.Navigator initialRouteName={firstRoute} drawerContent={(props)=><YardDrawerContent {...props} user={user} onLogout={logout}/>} screenOptions={{
@@ -55,6 +56,7 @@ export default function App() {
       drawerActiveBackgroundColor:'#e6f5ec',drawerActiveTintColor:'#187747',drawerInactiveTintColor:'#3d4d56',
       drawerLabelStyle:{fontSize:14,fontWeight:'800'},drawerItemStyle:{borderRadius:10,marginHorizontal:10},
     }}>
+      <Drawer.Screen name="Dashboard" options={{title:'🏠  DASHBOARD',drawerLabel:'🏠  Dashboard'}}>{props=><DashboardScreen {...props} role={user.role}/>}</Drawer.Screen>
       {isGate&&<Drawer.Screen name="Entry" component={GateInScreen} options={{title:'🟢  GATE IN',drawerLabel:'🟢  Gate In'}}/>}
       {isYard&&<Drawer.Screen name="StoreMove" options={{title:'🔵  PUT-AWAY / MOVE',drawerLabel:'🔵  Put-away / Move'}}>{props=><PutAwayMoveScreen {...props} role={user.role}/>}</Drawer.Screen>}
       {isGate&&<Drawer.Screen name="Exit" component={GateOutScreen} options={{title:'🔴  GATE OUT',drawerLabel:'🔴  Gate Out'}}/>}

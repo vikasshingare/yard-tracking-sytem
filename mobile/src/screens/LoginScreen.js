@@ -28,6 +28,7 @@ export default function LoginScreen({ onSignedIn }) {
       <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" textContentType="emailAddress" />
       <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry textContentType="password" />
       <Pressable style={styles.button} onPress={signIn} disabled={busy}><Text style={styles.buttonText}>{busy ? 'SIGNING IN…' : 'SIGN IN'}</Text></Pressable>
+      <Image source={require('../../assets/shipping-waves.png')} style={styles.wave} resizeMode="stretch" accessibilityLabel="Shipping wave design" />
     </KeyboardAvoidingView>
   );
 }
@@ -38,6 +39,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, textAlign: 'center', fontWeight: '900', color: '#16232d' },
   subtitle: { fontSize: 18, textAlign: 'center', color: '#53616b', marginBottom: 12 },
   input: { backgroundColor: 'white', borderRadius: 12, paddingHorizontal: 16, minHeight: 60, fontSize: 18 },
-  button: { minHeight: 66, justifyContent: 'center', alignItems: 'center', backgroundColor: '#16232d', borderRadius: 14, marginTop: 8 },
+  button: { minHeight: 66, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0759a5', borderRadius: 14, marginTop: 8 },
   buttonText: { color: 'white', fontSize: 20, fontWeight: '900' },
+  wave:{position:'absolute',bottom:0,left:0,right:0,width:'100%',height:75,zIndex:-1},
 });
